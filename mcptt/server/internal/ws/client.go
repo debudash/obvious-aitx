@@ -118,6 +118,13 @@ func (h *Handler) BroadcastAffiliationChanged(userID, groupID, state string) {
 	h.hub.Broadcast(msg)
 }
 
+// BroadcastCallEvent publishes one pre-rendered call-control or emergency
+// frame (protocol JSON built by the api layer) to every connected client.
+// The api layer owns rendering; the ws layer only fans out.
+func (h *Handler) BroadcastCallEvent(msg []byte) {
+	h.hub.Broadcast(msg)
+}
+
 // dispatchInbound routes one client frame. Media offers go to the SDP
 // handler in a goroutine — answering blocks on ICE gathering, and a read
 // pump that stalled there would delay the connection's other frames. Any

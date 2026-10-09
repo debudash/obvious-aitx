@@ -51,11 +51,15 @@ const (
 // carry the machine's decisions (grant/deny/queue/revoke/expiry) for the
 // affected call; Queue is the post-decision waiting list (the wire's
 // FloorGranted.Queue — the foundation decision type stays lean, the wire
-// format carries the array).
+// format carries the array). GroupID is set on CallStarted for group and
+// broadcast calls; Target is the affected user of a ParticipantRemoved
+// event (Actor is the remover).
 type Event struct {
 	Type      EventType
 	CallID    string
 	Actor     string
+	Target    string
+	GroupID   string
 	Kind      CallKind
 	Decisions []floor.FloorDecision
 	Queue     []string
@@ -69,6 +73,13 @@ type SessionConfig struct {
 	// calls (backed by the store at wiring time; static in tests). A nil
 	// checker denies every group join — secure by default.
 	Affiliation func(userID, groupID string) bool
+	// Media is the SFU's grant mirror (media.Gate in production). Every
+	// floor transition writes it inside the same critical section as the
+	// call state it mirrors — the machine under its own lock, the session
+	// layer under the manager lock — so relay permission never disagrees
+	// with arbitration (spec boundary invariant). Nil in tests without a
+	// media plane.
+	Media MediaGate
 	// TokenGen mints unguessable identifiers: floor tokens and call IDs.
 	TokenGen func() string
 	// OnEvent receives every session event. Emitted outside the manager
@@ -80,14 +91,16 @@ type SessionConfig struct {
 // waits, who is present. Late joiners render the speaker immediately from
 // this snapshot; the audio itself arrives from the SFU.
 type SessionInfo struct {
-	CallID       string
-	Kind         CallKind
-	GroupID      string
-	FloorControl bool
-	Participants []string
-	Speaker      string
-	SpeakerSince time.Time // zero when idle
-	Queue        []floor.QueuedRequest
+	CallID        string
+	Kind          CallKind
+	GroupID       string
+	FloorControl  bool
+	Emergency     bool
+	ImminentPeril bool
+	Participants  []string
+	Speaker       string
+	SpeakerSince  time.Time // zero when idle
+	Queue         []floor.QueuedRequest
 }
 
 // SessionManager owns every live call. Safe for concurrent use.
@@ -97,6 +110,7 @@ type SessionManager struct {
 	maxTalk  time.Duration
 	maxQueue int
 	affil    func(userID, groupID string) bool
+	media    MediaGate
 	tokenGen func() string
 	onEvent  func(Event)
 }
@@ -109,6 +123,7 @@ func NewSessionManager(cfg SessionConfig) *SessionManager {
 		maxTalk:  cfg.MaxTalkDuration,
 		maxQueue: cfg.MaxQueueDepth,
 		affil:    cfg.Affiliation,
+		media:    cfg.Media,
 		tokenGen: cfg.TokenGen,
 		onEvent:  cfg.OnEvent,
 	}
@@ -124,17 +139,29 @@ func NewSessionManager(cfg SessionConfig) *SessionManager {
 	return sm
 }
 
+// SetOnEvent replaces the event sink. Startup-only: call it before the
+// server accepts traffic (main.go wires it to the api layer's fan-out,
+// which needs the built Server). The zero sink swallows events until
+// wiring completes.
+func (sm *SessionManager) SetOnEvent(fn func(Event)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.onEvent = fn
+}
+
 // session is one live call. All access is under the manager lock.
 type session struct {
-	kind         CallKind
-	id           string
-	groupID      string // group and broadcast calls
-	caller       string // private calls
-	callee       string // private calls
-	floorControl bool   // false only for direct private calls
-	participants map[string]*participant
-	machine      *floorMachine
-	directTokens map[string]string // direct calls: stable per-participant tokens
+	kind          CallKind
+	id            string
+	groupID       string // group and broadcast calls
+	caller        string // private calls
+	callee        string // private calls
+	floorControl  bool   // false only for direct private calls
+	emergency     bool   // escalated to the emergency tier (priority 9)
+	imminentPeril bool   // distinct flagged mode: "call about help"
+	participants  map[string]*participant
+	machine       *floorMachine
+	directTokens  map[string]string // direct calls: stable per-participant tokens
 }
 
 type participant struct {
@@ -163,9 +190,10 @@ func (sm *SessionManager) StartBroadcast(groupID, dispatcher string, dispatcherP
 	if dispatcherPriority < floor.PriorityDispatcher {
 		return SessionInfo{}, ErrNoFloorControl
 	}
-	if !sm.affiliatedLocked(groupID, dispatcher) {
-		return SessionInfo{}, ErrNotAffiliated
-	}
+	// A broadcast is by definition a dispatcher announcement: the P10 gate
+	// above already restricts it to net control, so the affiliation rule
+	// that governs group membership does not apply to the announcer —
+	// dispatch announces to any talkgroup it serves.
 	return sm.startLocked(KindBroadcast, groupID, dispatcher, dispatcherPriority, "", true), nil
 }
 
@@ -194,24 +222,33 @@ func (sm *SessionManager) startLocked(kind CallKind, groupID, initiator string, 
 		directTokens: map[string]string{},
 	}
 	if floorControl {
-		s.machine = newFloorMachine(MachineConfig{
+		cfg := MachineConfig{
 			MaxTalkDuration: sm.maxTalk,
 			MaxQueueDepth:   sm.maxQueue,
 			TokenGen:        sm.tokenGen,
-			// The machine invokes this after dropping its own lock, so the
-			// callback may take the manager lock: no ordering inversion.
-			OnExpired: func(holder string, ds []floor.FloorDecision) {
-				sm.onEvent(Event{
-					Type: EventFloorDecisions, CallID: id, Actor: holder,
-					Kind: kind, Decisions: ds,
-				})
-			},
-		})
+		}
+		// The machine mirrors every transition into the SFU's grant mirror
+		// while holding its own lock — the seam that keeps "who holds the
+		// floor" and "who may be relayed" from ever disagreeing.
+		if sm.media != nil {
+			cfg.Gate = boundGate{gate: sm.media, call: id}
+		}
+		// The machine invokes this after dropping its own lock, so the
+		// callback may take the manager lock: no ordering inversion. The
+		// mirror writes for expiry already happened inside the machine's
+		// critical section (strip + queue-head grant).
+		cfg.OnExpired = func(holder string, ds []floor.FloorDecision) {
+			sm.onEvent(Event{
+				Type: EventFloorDecisions, CallID: id, Actor: holder,
+				Kind: kind, Decisions: ds,
+			})
+		}
+		s.machine = newFloorMachine(cfg)
 	}
 	s.participants[initiator] = &participant{priority: initiatorPriority, joinedAt: time.Now()}
 	sm.calls[s.id] = s
 	info := sm.snapshotLocked(s)
-	sm.onEvent(Event{Type: EventCallStarted, CallID: s.id, Actor: initiator, Kind: kind})
+	sm.onEvent(Event{Type: EventCallStarted, CallID: s.id, Actor: initiator, GroupID: groupID, Kind: kind})
 	return info
 }
 
@@ -270,6 +307,7 @@ func (sm *SessionManager) RequestFloor(callID, userID string, emergency bool) (f
 	}
 	if !s.floorControl {
 		d := sm.directGrantLocked(s, userID, p.priority)
+		sm.writeGate(callID, []floor.FloorDecision{d}) // same critical section as the token
 		sm.mu.Unlock()
 		sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: s.kind, Decisions: []floor.FloorDecision{d}})
 		return d, nil
@@ -320,14 +358,16 @@ func (sm *SessionManager) ReleaseFloor(callID, userID string) ([]floor.FloorDeci
 	}
 	var decisions []floor.FloorDecision
 	if s.floorControl {
-		decisions = s.machine.Release(userID)
+		decisions = s.machine.Release(userID) // holder: strip + auto-grant mirrored inside the machine lock
 	} else {
 		delete(s.directTokens, userID)
+		sm.revokeGate(callID, userID)
 	}
+	kind := s.kind
 	sm.mu.Unlock()
-	if len(decisions) > 0 {
-		sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: s.kind, Decisions: decisions})
-	}
+	// Always emitted — even with empty decisions — so the wiring echoes the
+	// release (and queue cancellation) to every client.
+	sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: kind, Decisions: decisions})
 	return decisions, nil
 }
 
@@ -378,17 +418,88 @@ func (sm *SessionManager) RemoveParticipant(callID, target, by string, byLevel f
 	var decisions []floor.FloorDecision
 	if s.floorControl {
 		if g, holding := s.machine.Grant(); holding && g.UserID == target {
-			decisions, _ = s.machine.Revoke(target, by, byLevel)
+			decisions, _ = s.machine.Revoke(target, by, byLevel) // strip + auto-grant mirrored inside the machine lock
 		} else {
 			s.machine.Release(target) // cancel any queued entry
 		}
 	}
 	delete(s.directTokens, target)
+	sm.revokeGate(callID, target) // direct-token grants have no machine to strip them
 	delete(s.participants, target)
 	kind := s.kind
 	sm.mu.Unlock()
-	sm.onEvent(Event{Type: EventParticipantRemoved, CallID: callID, Actor: by, Kind: kind, Decisions: decisions})
+	sm.onEvent(Event{Type: EventParticipantRemoved, CallID: callID, Actor: by, Target: target, Kind: kind, Decisions: decisions})
 	return decisions, nil
+}
+
+// EscalateEmergency upgrades a live call to the emergency tier (spec:
+// "Emergency flag upgrades call priority to 9 and pre-empts the active
+// floor"). Three effects resolve in this one call, none depending on
+// client goodwill: the user's arbitration priority for the call becomes 9
+// for its remaining life; a pre-empting emergency floor request is issued
+// immediately — the machine strips any lower-priority talker in the same
+// scheduling turn (or queues behind net control, whose P10 outranks
+// emergency); and the call is marked emergency so dispatch renders it as
+// one. Imminent peril reuses the emergency tier under a distinct flag so
+// the audit log can tell "call for help" from "call about help".
+//
+// The returned decision is the machine's arbitration result: a grant
+// (idle floor or pre-emption), a queue entry (net control holds the
+// floor), or a listen-only denial (the caller is a broadcast listener —
+// the dispatcher's announcement voice cannot be pre-empted by a P9
+// listener; the alert the API layer attaches still reaches dispatch).
+// Direct (floor-control-free) private calls have no floor to pre-empt;
+// their grant is restated and the escalation's effect is the alert and
+// the priority/state change alone.
+func (sm *SessionManager) EscalateEmergency(callID, userID string, imminentPeril bool) (floor.FloorDecision, SessionInfo, error) {
+	sm.mu.Lock()
+	s, ok := sm.calls[callID]
+	if !ok {
+		sm.mu.Unlock()
+		return floor.FloorDecision{}, SessionInfo{}, ErrUnknownCall
+	}
+	p, joined := s.participants[userID]
+	if !joined {
+		sm.mu.Unlock()
+		return floor.FloorDecision{}, SessionInfo{}, ErrNotInCall
+	}
+
+	s.emergency = true
+	if imminentPeril {
+		s.imminentPeril = true
+	}
+	p.priority = floor.PriorityEmergency // every later burst arbitrates at 9
+
+	var decision floor.FloorDecision
+	var queue []string
+	switch {
+	case !s.floorControl:
+		// Full-duplex direct call: no floor to pre-empt. Restate the
+		// direct grant so the mirror and the wire carry the escalated
+		// user's permission.
+		decision = sm.directGrantLocked(s, userID, p.priority)
+		sm.writeGate(callID, []floor.FloorDecision{decision})
+	case s.kind == KindBroadcast && p.priority < floor.PriorityDispatcher:
+		// A broadcast listener cannot strip the dispatcher's voice (P9
+		// loses to the P10 announcement floor); dispatch still sees the
+		// alert the API layer records.
+		decision = floor.FloorDecision{
+			UserID: userID, Outcome: floor.OutcomeDenied,
+			Level: p.priority, Emergency: true, Reason: "listen-only",
+		}
+	default:
+		decision = s.machine.Request(userID, p.priority, true)
+		queue = s.machine.QueueUserIDs()
+	}
+
+	info := sm.snapshotLocked(s)
+	kind := s.kind
+	sm.mu.Unlock()
+	sm.onEvent(Event{
+		Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: kind,
+		Decisions: []floor.FloorDecision{decision}, Queue: queue,
+	})
+	return decision, info, nil
 }
 
 // Leave records a participant leaving. A holder's departure auto-grants the
@@ -407,9 +518,10 @@ func (sm *SessionManager) Leave(callID, userID string) ([]floor.FloorDecision, e
 	}
 	var decisions []floor.FloorDecision
 	if s.floorControl {
-		decisions = s.machine.Release(userID) // holder: auto-grants the queue head
+		decisions = s.machine.Release(userID) // holder: strip + auto-grant mirrored inside the machine lock
 	}
 	delete(s.directTokens, userID)
+	sm.revokeGate(callID, userID)
 	delete(s.participants, userID)
 	ended := s.kind == KindPrivate || len(s.participants) == 0
 	kind := s.kind
@@ -417,6 +529,7 @@ func (sm *SessionManager) Leave(callID, userID string) ([]floor.FloorDecision, e
 		if s.floorControl {
 			s.machine.Stop()
 		}
+		sm.clearGate(callID) // teardown: the mirror forgets the call
 		delete(sm.calls, callID)
 	}
 	sm.mu.Unlock()
@@ -439,6 +552,7 @@ func (sm *SessionManager) End(callID, by string) error {
 	if s.floorControl {
 		s.machine.Stop()
 	}
+	sm.clearGate(callID) // teardown: the mirror forgets the call
 	kind := s.kind
 	delete(sm.calls, callID)
 	sm.mu.Unlock()
@@ -461,11 +575,13 @@ func (sm *SessionManager) Snapshot(callID string) (SessionInfo, error) {
 // snapshotLocked renders client-visible state. Caller holds sm.mu.
 func (sm *SessionManager) snapshotLocked(s *session) SessionInfo {
 	info := SessionInfo{
-		CallID:       s.id,
-		Kind:         s.kind,
-		GroupID:      s.groupID,
-		FloorControl: s.floorControl,
-		Participants: make([]string, 0, len(s.participants)),
+		CallID:        s.id,
+		Kind:          s.kind,
+		GroupID:       s.groupID,
+		FloorControl:  s.floorControl,
+		Emergency:     s.emergency,
+		ImminentPeril: s.imminentPeril,
+		Participants:  make([]string, 0, len(s.participants)),
 	}
 	for uid := range s.participants {
 		info.Participants = append(info.Participants, uid)

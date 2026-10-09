@@ -84,6 +84,12 @@ type MachineConfig struct {
 	// Now and TokenGen are injection points for tests.
 	Now      func() time.Time
 	TokenGen func() string
+	// Gate is the media-plane mirror (perCallGate): every transition —
+	// grant, release, revoke, pre-emption, and expiry — writes it while the
+	// machine lock is held, so "who holds the floor" and "who may be
+	// relayed" cannot disagree (spec boundary invariant). Nil in tests
+	// without a media plane.
+	Gate perCallGate
 	// OnExpired fires after a max-duration expiry auto-released the floor,
 	// with the expired holder and the queue-head grant (if anyone waited).
 	// It runs outside the machine lock.
@@ -105,6 +111,7 @@ type floorMachine struct {
 
 	now       func() time.Time
 	tokenGen  func() string
+	gate      perCallGate
 	onExpired func(expiredHolder string, decisions []floor.FloorDecision)
 	timer     *time.Timer // non-nil while a non-emergency holder is timed
 }
@@ -116,6 +123,7 @@ func newFloorMachine(cfg MachineConfig) *floorMachine {
 		maxQueue:  cfg.MaxQueueDepth,
 		now:       cfg.Now,
 		tokenGen:  cfg.TokenGen,
+		gate:      cfg.Gate,
 		onExpired: cfg.OnExpired,
 	}
 	if m.maxTalk <= 0 {
@@ -298,25 +306,38 @@ func (m *floorMachine) Stop() {
 }
 
 // grantLocked installs a grant and arms the max-duration timer for
-// non-emergency bursts. Callers hold mu.
+// non-emergency bursts. Callers hold mu. The mirror write happens here, in
+// the machine's critical section: a pre-empting grant carries
+// PreemptedUserID, so Apply drops the displaced talker's relay permission
+// and admits the new one in the same step.
 func (m *floorMachine) grantLocked(userID string, lvl floor.FloorLevel, emergency bool, preempted string) floor.FloorDecision {
 	m.state = stateGranted
 	m.active = grant{userID: userID, level: lvl, emergency: emergency, token: m.tokenGen(), since: m.now()}
 	if !emergency {
 		m.timer = time.AfterFunc(m.maxTalk, m.onExpireTimer)
 	}
-	return floor.FloorDecision{
+	d := floor.FloorDecision{
 		UserID: userID, Outcome: floor.OutcomeGranted, Level: lvl,
 		Emergency: emergency, Token: m.active.token, PreemptedUserID: preempted,
 	}
+	if m.gate != nil {
+		m.gate.apply([]floor.FloorDecision{d})
+	}
+	return d
 }
 
-// stripGrantLocked ends the active burst: the timer stops and the token
-// clears, so media keyed to the old token stops forwarding immediately.
+// stripGrantLocked ends the active burst: the timer stops, the token
+// clears, and the media mirror drops the holder — a release, revoke,
+// expiry, or pre-emption always cuts relay permission in the same critical
+// section that ends the grant, so media keyed to the old token stops
+// forwarding immediately.
 func (m *floorMachine) stripGrantLocked() {
 	if m.timer != nil {
 		m.timer.Stop()
 		m.timer = nil
+	}
+	if m.state == stateGranted && m.gate != nil {
+		m.gate.revoke(m.active.userID)
 	}
 	m.active = grant{}
 	m.state = stateIdle
