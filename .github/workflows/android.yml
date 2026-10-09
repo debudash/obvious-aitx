@@ -32,8 +32,10 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # No SDK setup step: ubuntu runners ship a complete, license-accepted
+      # Android SDK ($ANDROID_HOME). android-actions/setup-android@v3 runs
+      # `sdkmanager tools`, which fails — the deprecated 'tools' package no
+      # longer exists in the SDK repository.
 
       - name: Set up Gradle caching
         uses: gradle/actions/setup-gradle@v4
