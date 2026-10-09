@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark operations theme, always-on: MC field devices run dark. -->
+    <style name="Theme.Mcptt" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/ops_accent</item>
+        <item name="colorOnPrimary">#0D1117</item>
+        <item name="colorSecondary">@color/ops_talk</item>
+        <item name="android:colorBackground">@color/ops_background</item>
+        <item name="colorSurface">@color/ops_surface</item>
+        <item name="colorSurfaceVariant">@color/ops_surface_higher</item>
+        <item name="colorError">@color/ops_denied</item>
+        <item name="android:statusBarColor">@color/ops_background</item>
+        <item name="android:navigationBarColor">@color/ops_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
