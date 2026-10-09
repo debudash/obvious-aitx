@@ -128,10 +128,21 @@ def idf_overlap(a: frozenset[str], b: frozenset[str], stats: CorpusStats) -> flo
     A shared rare proper noun ("lisnard") moves this far more than a
     shared "the" — the snapshot corpus supplies the weights.
     """
-    union_weight = sum(stats.idf(token) for token in a | b)
+    union = a | b
+    shared = a & b
+    # Accumulate in sorted order over the token set — set iteration order
+    # is hash-randomized per process, and float addition is not
+    # associative, so unsorted sums threaten cross-process determinism.
+    # The denominator is the shared weight plus the unshared weight, in
+    # that exact accumulation order: when the sets are identical the two
+    # sums are bit-equal, so the ratio is exactly 1.0 — and since every
+    # weight is non-negative, the ratio can never exceed 1.0 on any
+    # platform's rounding (the 3.11 CI failure was a last-ULP overshoot).
+    shared_weight = sum(stats.idf(token) for token in sorted(shared))
+    unshared_weight = sum(stats.idf(token) for token in sorted(union - shared))
+    union_weight = shared_weight + unshared_weight
     if union_weight <= 0.0:
         return 0.0
-    shared_weight = sum(stats.idf(token) for token in a & b)
     return shared_weight / union_weight
 
 

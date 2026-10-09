@@ -64,6 +64,15 @@ def test_idf_overlap_weights_rare_tokens_more():
     assert idf_overlap(frozenset({"fed"}), frozenset({"fed"}), stats) == pytest.approx(1.0)
 
 
+def test_idf_overlap_identical_sets_are_exactly_one():
+    # Regression: shared and union weights accumulated in different set
+    # orders rounded to 1.0000000000000002 on Python 3.11's libm,
+    # tripping the [0, 1] feature validation. Sorted accumulation makes
+    # the ratio exactly 1.0 — assert exact equality, not approx.
+    stats = stats_for([frozenset({"fed", "lisnard"}), frozenset({"x"})])
+    assert idf_overlap(frozenset({"fed", "lisnard"}), frozenset({"fed", "lisnard"}), stats) == 1.0
+
+
 def test_numeric_agreement_cases():
     silent = numeric_agreement(frozenset({"fed"}), frozenset({"rates"}))
     one_sided = numeric_agreement(frozenset({"100000"}), frozenset({"fed"}))
