@@ -91,6 +91,64 @@ The gate is currently fed at startup wiring only; the floor-engine PR
 replaces that with live controller decisions inside the call-control
 critical section (the `Apply`/`RevokeUser`/`Clear` contract is final).
 
+## Carrier RX integration (flag-gated, off by default)
+
+The system is over-the-top and stays that way. Carrier connectivity is a
+deployment-time capability: a **receive-only** mirror of what the server has
+already arbitrated. It can never grant floor, never accept inbound audio, and
+never becomes a second control plane. A future SIP/IWF adapter slots in
+behind the same `RXAdapter` interface (`server/integration`) without touching
+call control or media.
+
+### Enabling
+
+Configuration is environment-based; every key maps to an `MCPTT_CARRIER_*`
+variable and **unknown `MCPTT_CARRIER_*` variables fail the server at
+startup** (a misspelled flag must never silently disable the integration):
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `MCPTT_CARRIER_ENABLED` | Master switch. `false` constructs nothing: no adapter, no socket, no tap. | `false` |
+| `MCPTT_CARRIER_ADAPTER` | `rtp` (audio streaming) or `webhook` (JSON events). | `rtp` |
+| `MCPTT_CARRIER_ENDPOINT` | Carrier RX `host:port` (RTP adapter). | — |
+| `MCPTT_CARRIER_CODEC` | `pcmu` (PT 0, 8 kHz) or `opus` (PT 96, 48 kHz). | `pcmu` |
+| `MCPTT_CARRIER_GROUPS` | Comma-separated talkgroup filter; **empty streams nothing**. | empty |
+| `MCPTT_CARRIER_EVENTS_URL` | HTTP(S) JSON event webhook target (webhook adapter). | — |
+
+```sh
+MCPTT_CARRIER_ENABLED=true \
+MCPTT_CARRIER_ADAPTER=rtp \
+MCPTT_CARRIER_ENDPOINT=rx.carrier.example:5004 \
+MCPTT_CARRIER_GROUPS=tg-fire,tg-ops \
+go run ./cmd/server
+```
+
+### What the carrier receives
+
+- **Audio (RTP adapter):** only the currently granted talker's bursts —
+  the same packets the SFU's floor gate already chose to forward, mirrored
+  by a per-call tap — packetized as 20 ms frames to the configured endpoint
+  with a stable SSRC and continuous seq/timestamps per stream. While the
+  floor is denied, queued, or revoked, the carrier hears **true digital
+  silence** (all-0xFF PCMU / empty Opus frames); the cadence never stops.
+- **Events (webhook adapter):** `call.started`, `call.ended`, floor
+  decisions, and emergency events as JSON with a timestamp and call ID,
+  delivered best-effort. Webhooks are a mirror, not a record: durability
+  lives in the dispatcher rail and the audit log.
+- **Talkgroup filter:** only flagged groups stream at all; unflagged groups
+  and private calls never leave the server, flag on or off.
+- **Emergency parity:** an emergency upgrade flows through the same grant
+  path — the carrier hears whichever talker the floor controller granted,
+  exactly like any other grant.
+
+### The flag-off guarantee
+
+With `MCPTT_CARRIER_ENABLED=false` (the default) the integration code path
+is never constructed: `NewFromConfig` returns nil, no adapter exists, no
+media tap registers, and the server opens **zero external sockets**. This is
+asserted by the integration suite (`bridge_test.go`), which fails on any
+dial attempt while the flag is off.
+
 ## Running
 
 ```sh
