@@ -39,7 +39,7 @@ func newEnv(t *testing.T) *env {
 	tokens := auth.NewTokenizer([]byte(testSecret), time.Hour)
 	hub := ws.NewHandler(ws.NewHub(), tokens)
 	e := &env{st: st, tokens: tokens}
-	e.ts = httptest.NewServer(New(st, tokens, hub))
+	e.ts = httptest.NewServer(New(st, tokens, hub, nil, nil))
 	t.Cleanup(e.ts.Close)
 	return e
 }
