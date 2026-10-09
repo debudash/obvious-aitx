@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-slate-950 text-slate-200 antialiased;
+  }
+  body {
+    @apply font-sans text-sm;
+  }
+  /* Keyboard-operable console: a consistent, visible focus ring everywhere. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-950;
+  }
+}
+
+@layer utilities {
+  .tabular-mono {
+    @apply font-mono tabular-nums;
+  }
+}
+
+/* Slim, dark scrollbars for the ops panels. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.slate.700') transparent;
+}

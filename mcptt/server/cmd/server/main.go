@@ -3,9 +3,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -138,6 +140,18 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack forwards the hijacker so WebSocket upgrades survive the logging
+// wrapper: http.ResponseWriter embedding does not forward http.Hijacker, and
+// without this every /ws upgrade fails with 500.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("mcptt: underlying ResponseWriter does not support hijacking")
+	}
+	w.status = http.StatusSwitchingProtocols
+	return h.Hijack()
 }
 
 // withLogging gives every request one visible access-log line.
