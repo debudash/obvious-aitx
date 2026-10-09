@@ -606,11 +606,19 @@ func (sm *SessionManager) Count() int {
 
 // GroupOf reports a live call's talkgroup: the resolver the carrier RX
 // bridge uses to apply the [carrier] groups allowlist. Private calls and
-// unknown calls resolve to no group. Non-blocking beyond the manager mutex
-// itself; safe to call from session-event handlers, which the manager
-// invokes outside its lock.
+// unknown calls resolve to no group. Never blocks on the manager mutex:
+// the manager invokes some session-event callbacks with its own lock held
+// (call starts), so this returns "no group" on contention instead of
+// deadlocking a callback that re-enters it.
 func (sm *SessionManager) GroupOf(callID string) (string, bool) {
-	sm.mu.Lock()
+	// TryLock, not Lock: the manager emits some events (call starts) with
+	// its own lock held, and the carrier bridge's event callback resolves
+	// groups as a fallback. A blocking lookup there would self-deadlock;
+	// on contention the caller treats the call as unflagged, which the
+	// event's own GroupID field makes irrelevant for flagged calls.
+	if !sm.mu.TryLock() {
+		return "", false
+	}
 	defer sm.mu.Unlock()
 	s, ok := sm.calls[callID]
 	if !ok || s.kind == KindPrivate || s.groupID == "" {
