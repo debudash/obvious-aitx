@@ -11,7 +11,6 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 
 from equinox.model import (
-    MIN_PLAUSIBLE_PRICE,
     FeeParams,
     FetchError,
     Market,
@@ -60,14 +59,14 @@ def test_raw_dollars_value_rejected():
         normalize_probability(62, field_label="yes_price")
 
 
-def test_micro_probability_rejected():
-    # The inverse trap: 62c processed down to 0.000062.
-    with pytest.raises(PriceScaleError, match="units error"):
-        normalize_probability(0.000062, field_label="yes_price")
-
-
-def test_min_plausible_price_boundary_is_valid():
-    assert normalize_probability(MIN_PLAUSIBLE_PRICE) == MIN_PLAUSIBLE_PRICE
+def test_micro_prices_are_valid():
+    # Recalibrated 2026-10-09: the old 0.001 plausibility floor rejected real
+    # Gamma longshots (live records price at 0.0005 — recorded in
+    # tests/fixtures/polymarket_markets.json). No magnitude threshold can
+    # separate a ÷1000 units error (0.000062) from a legitimate 0.0005
+    # longshot, so the [0, 1] bounds are the whole contract.
+    assert normalize_probability(0.000062, field_label="yes_price") == 0.000062
+    assert normalize_probability(0.0005, field_label="yes_price") == 0.0005
 
 
 @pytest.mark.parametrize("value", [-0.01, 1.0001, 100.0, -1.0])
@@ -105,9 +104,11 @@ def test_dollar_quote_accepts_numeric_strings():
 
 def test_dollar_quote_scale_traps_rejected():
     with pytest.raises(PriceScaleError):
-        normalize_dollars(62)  # cents read as whole dollars
-    with pytest.raises(PriceScaleError):
-        normalize_dollars(0.000062)  # dollars double-divided
+        normalize_dollars(62)  # cents read as whole dollars — out of [0, 1]
+    # Recalibrated with the plausibility floor's removal: a double-divided
+    # 62c (0.000062) sits inside [0, 1] and is real-data-indistinguishable
+    # from legitimate sub-0.001 longshots, so it is accepted.
+    assert normalize_dollars(0.000062) == 0.000062
 
 
 def test_dollar_quote_none_passes_through():
@@ -165,8 +166,10 @@ def test_outcome_prices_coerced_to_float():
 def test_outcome_rejects_mis_scaled_prices():
     with pytest.raises(PriceScaleError):
         Outcome(name="Yes", side="yes", yes_price=62)
-    with pytest.raises(PriceScaleError):
-        Outcome(name="No", side="no", bid=0.000062)
+    # Sub-0.001 quotes are valid (real Gamma longshots price at 0.0005 —
+    # see test_micro_prices_are_valid); only out-of-bounds values reject.
+    outcome = Outcome(name="No", side="no", bid=0.000062)
+    assert outcome.bid == 0.000062
     with pytest.raises(PriceScaleError):
         Outcome(name="No", side="no", ask=1.5)
 
