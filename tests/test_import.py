@@ -14,8 +14,10 @@ def test_all_packages_import() -> None:
     assert equinox.__doc__
 
 
-def test_cli_entry_point_is_a_declared_stub() -> None:
+def test_cli_entry_point_parses_help() -> None:
+    """The scaffold stub is gone: main() is a real argparse entry point."""
     from equinox.cli import main
 
-    with pytest.raises(NotImplementedError, match="scaffolded"):
-        main()
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--help"])
+    assert excinfo.value.code == 0
