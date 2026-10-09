@@ -45,6 +45,11 @@ const (
 	EventParticipantLeft    EventType = "ParticipantLeft"
 	EventParticipantRemoved EventType = "ParticipantRemoved"
 	EventFloorDecisions     EventType = "FloorDecisions"
+	// EventFloorReleased echoes a client's PTT-up to the wire (the
+	// FloorReleased contract: "client → server after releasing PTT
+	// (echoed to all)"). Emitted by ReleaseFloor before the decisions
+	// event, so clients see the release before any queue-head grant.
+	EventFloorReleased EventType = "FloorReleased"
 )
 
 // Event is one session change the wiring must fan out. FloorDecisions events
@@ -364,10 +369,15 @@ func (sm *SessionManager) ReleaseFloor(callID, userID string) ([]floor.FloorDeci
 		sm.revokeGate(callID, userID)
 	}
 	kind := s.kind
+	groupID := s.groupID
 	sm.mu.Unlock()
-	// Always emitted — even with empty decisions — so the wiring echoes the
-	// release (and queue cancellation) to every client.
-	sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: kind, GroupID: s.groupID, Decisions: decisions})
+	// The release echo goes out first (the wire contract echoes a client's
+	// PTT-up to all), then the decisions event carries any queue-head
+	// grant — cause before effect. The decisions event is emitted even
+	// when empty, preserving the established event contract for wiring
+	// that counts them.
+	sm.onEvent(Event{Type: EventFloorReleased, CallID: callID, Actor: userID, Kind: kind, GroupID: groupID})
+	sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: kind, GroupID: groupID, Decisions: decisions})
 	return decisions, nil
 }
 

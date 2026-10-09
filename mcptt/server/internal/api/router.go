@@ -88,6 +88,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/emergency/alerts", authed(s.handleListAlerts))
 	mux.Handle("POST /api/emergency/alerts/{id}/ack", admin(s.handleAckAlert))
 
+	// Media admission: the room-scoped token a call participant presents
+	// with their MediaOffer. Minted per call and user; short-lived.
+	mux.Handle("POST /api/calls/{id}/media-token", authed(s.handleMediaToken))
+
 	// Dispatch control: force-end, revoke the active talker, remove a
 	// participant, start a broadcast. All dispatcher-only by the role
 	// claim; every action lands in the audit log.
