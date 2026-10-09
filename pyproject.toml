@@ -40,7 +40,9 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["equinox"]
+# Kept in sync with the CI gate (see .github/workflows/ci.yml): coverage is
+# scoped to the model package and config module.
+source = ["equinox.model", "equinox.config"]
 branch = true
 
 [tool.coverage.report]
