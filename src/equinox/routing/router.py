@@ -215,6 +215,11 @@ def _fee_params_for(market: Market, config: RouterConfig) -> FeeParams:
     return market.fees
 
 
+def _selection_cost(quote: VenueQuote, config: RouterConfig) -> float:
+    """Selection-time cost: stale quotes carry ``stale_cost_penalty`` (downweight)."""
+    return quote.all_in_cost + (config.stale_cost_penalty if quote.stale else 0.0)
+
+
 def _build_quote(
     market: Market, side: Side, snapshot: MarketSnapshot, config: RouterConfig
 ) -> tuple[VenueQuote | None, str]:
@@ -344,7 +349,8 @@ def route(
         age = (snapshot.fetched_at - market.fetched_at).total_seconds()
         rationale.append(
             f"venue={quote.venue} quote is stale: age {age:.0f}s exceeds max "
-            f"{config.max_quote_age.total_seconds():.0f}s"
+            f"{config.max_quote_age.total_seconds():.0f}s — selection penalty "
+            f"+{config.stale_cost_penalty:.4f} applied"
         )
     for venue in sorted(set(duplicated)):
         rationale.append(
@@ -354,15 +360,12 @@ def route(
 
     chosen: str | None = None
     if quotes:
-        best, runner_up = quotes[0], (quotes[1] if len(quotes) > 1 else None)
-        gap = (
-            runner_up.all_in_cost - best.all_in_cost
-            if runner_up is not None
-            else None
-        )
-        if runner_up is not None and gap > config.cost_tie_epsilon:  # type: ignore[operator]
+        best_raw = quotes[0]  # cheapest on raw cost — quotes are raw-sorted
+        if len(quotes) >= 2 and (
+            raw_gap := quotes[1].all_in_cost - best_raw.all_in_cost
+        ) > config.cost_tie_epsilon:
             deltas = {
-                component: runner_up.breakdown[component] - best.breakdown[component]
+                component: quotes[1].breakdown[component] - best_raw.breakdown[component]
                 for component in _QUOTE_COMPONENTS
             }
             dominant = max(
@@ -370,15 +373,18 @@ def route(
                 key=lambda c: (abs(deltas[c]), -_QUOTE_COMPONENTS.index(c)),
             )
             rationale.append(
-                f"venue={best.venue} leads venue={runner_up.venue} by {gap:.4f} on raw "
-                f"cost — largest contributor: {dominant} ({deltas[dominant]:+.4f})"
+                f"venue={best_raw.venue} leads venue={quotes[1].venue} by {raw_gap:.4f} on "
+                f"raw cost — largest contributor: {dominant} ({deltas[dominant]:+.4f})"
             )
-        if gap is not None and gap <= config.cost_tie_epsilon:  # type: ignore[operator]
-            tie_group = [
-                q
-                for q in quotes
-                if (q.all_in_cost - best.all_in_cost) <= config.cost_tie_epsilon
-            ]
+        # Selection runs on penalized costs: stale quotes are downweighted, never
+        # silently chosen (spec §Routing).
+        min_selection = min(_selection_cost(q, config) for q in quotes)
+        tie_group = [
+            q
+            for q in quotes
+            if _selection_cost(q, config) <= min_selection + config.cost_tie_epsilon
+        ]
+        if len(tie_group) > 1:
             named = ", ".join(f"venue={q.venue}" for q in tie_group)
             ranks = {liquidity_rank[q.venue] for q in tie_group}
             detail = ", ".join(
@@ -402,7 +408,24 @@ def route(
                 tie_group, key=lambda q: (-liquidity_rank[q.venue], q.venue)
             )
         else:
-            winner = best
+            winner = tie_group[0]
+        if any(q.stale for q in quotes):
+            if best_raw.venue != winner.venue:
+                rationale.append(
+                    f"stale penalty changed the outcome: venue={best_raw.venue} was cheapest "
+                    f"on raw cost; venue={winner.venue} wins after the "
+                    f"+{config.stale_cost_penalty:.4f} penalty"
+                )
+            elif best_raw.stale:
+                rationale.append(
+                    f"venue={winner.venue} is stale but still cheapest after the penalty — "
+                    "chosen with a freshness warning"
+                )
+        if all(q.stale for q in quotes):
+            rationale.append(
+                "warning: every quotable venue's quote is stale — deciding anyway on "
+                "penalized costs; verify quote freshness before acting on this decision"
+            )
         rationale.append(
             f"per-share all-in comparison under the top-of-book assumption (spec A2); "
             f"shares={intent.shares} do not change the ranking"
