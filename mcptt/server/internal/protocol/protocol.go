@@ -27,6 +27,13 @@ const (
 	// Foundation-live types: presence and affiliation fan-out on /ws.
 	TypePresenceUpdate     = "PresenceUpdate"
 	TypeAffiliationChanged = "AffiliationChanged"
+
+	// Media signaling (media-plane PR): SDP offer/answer over the WSS
+	// channel. A client offers exactly one sendrecv audio m-line — its
+	// microphone — together with the room-scoped token minted for the call;
+	// the server answers with the floor-audio track bound to that line.
+	TypeMediaOffer  = "MediaOffer"
+	TypeMediaAnswer = "MediaAnswer"
 )
 
 // Envelope is the outer frame of every WSS message; each typed message
@@ -173,4 +180,23 @@ type AffiliationChanged struct {
 	GroupID string `json:"groupId"`
 	State   string `json:"state"`
 	At      int64  `json:"at"` // unix millis
+}
+
+// MediaOffer — client → server: WebRTC offer for a call's media plane,
+// carrying the room-scoped media token minted for this call and user.
+type MediaOffer struct {
+	Type   string `json:"type"`
+	CallID string `json:"callId"`
+	Token  string `json:"token"`
+	SDP    string `json:"sdp"`
+}
+
+// MediaAnswer — server → client: the SFU's answer SDP, or an empty SDP
+// with Err set when the offer was rejected (bad or mismatched room token,
+// unparsable SDP, call ended).
+type MediaAnswer struct {
+	Type   string `json:"type"`
+	CallID string `json:"callId"`
+	SDP    string `json:"sdp,omitempty"`
+	Err    string `json:"err,omitempty"`
 }

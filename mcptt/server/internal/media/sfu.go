@@ -15,7 +15,6 @@ import (
 var ErrCallEnded = errors.New("media: call ended")
 
 const (
-	micTrackID   = "mcptt-mic"
 	floorTrackID = "mcptt-floor"
 	streamID     = "mcptt"
 )
