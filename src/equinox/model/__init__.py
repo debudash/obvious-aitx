@@ -34,14 +34,6 @@ multi-outcome markets. Downstream layers read this field — they never
 re-derive YES/NO from the venue-native ``name`` label.
 """
 
-MIN_PLAUSIBLE_PRICE = 0.001
-"""Lowest strictly-positive price the model accepts, on the 0–1 scale.
-
-A guard against units errors, not a venue tick table: 0 < p < 0.001 cannot
-come from a venue book quote — it is the signature of a mis-scaled value
-(e.g. 62¢ processed down to 0.000062). Exactly 0 and exactly 1 stay valid.
-"""
-
 
 class PriceScaleError(ValueError):
     """A price value is outside the valid probability scale or mis-scaled."""
@@ -64,11 +56,10 @@ def _as_price(value: object, field_label: str) -> float:
         raise PriceScaleError(
             f"{field_label}: {value!r} is outside [0, 1] — cents/dollars unit mixup?"
         )
-    if 0.0 < number < MIN_PLAUSIBLE_PRICE:
-        raise PriceScaleError(
-            f"{field_label}: {value!r} is below the plausible minimum "
-            f"{MIN_PLAUSIBLE_PRICE} — likely a units error (e.g. 62c read as 0.000062)"
-        )
+    # No magnitude floor below this: live Gamma longshots legitimately price
+    # at 0.0005 (recorded in tests/fixtures 2026-10-09), which no threshold
+    # can separate from a ÷1000 units error. Scale bugs are a cross-venue
+    # sanity concern, not an ingest-rejection concern.
     return number
 
 
@@ -463,7 +454,6 @@ __all__ = [
     "FeeParams",
     "Market",
     "MarketSnapshot",
-    "MIN_PLAUSIBLE_PRICE",
     "Outcome",
     "PriceScaleError",
     "Side",
