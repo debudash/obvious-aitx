@@ -44,18 +44,24 @@ jobs:
 
   ios-core:
     # The Linux-testable half of the iOS client: MCPTTCore (protocol codecs,
-    # floor reducer, stores, resilience) has no Apple-only imports, so the
-    # official Swift container builds and tests it. The SwiftUI/WebRTC app
+    # floor reducer, stores, resilience) has no Apple-only imports, so CI
+    # builds and tests it. Toolchain is installed as a binary (setup-swift)
+    # rather than a container: Docker Hub's unauthenticated pull rate limit
+    # rejects container jobs on shared runner IPs. The SwiftUI/WebRTC app
     # layer needs Xcode and is a documented follow-up (mcptt/ios/README.md).
     name: iOS core (Swift build + tests)
-    runs-on: ubuntu-latest
-    container: swift:6.0.3-jammy
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: mcptt/ios
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Swift 6.0.3
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0.3"
 
       - name: Build
         run: swift build
