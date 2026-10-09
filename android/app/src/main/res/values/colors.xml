@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#0D1B2A</color>
+
+    <!-- Dark operations palette (dispatcher-console aligned). -->
+    <color name="ops_background">#0D1117</color>
+    <color name="ops_surface">#161B22</color>
+    <color name="ops_surface_higher">#1C2430</color>
+    <color name="ops_border">#30363D</color>
+    <color name="ops_text">#E6EDF3</color>
+    <color name="ops_text_dim">#8B949E</color>
+    <color name="ops_accent">#58A6FF</color>
+    <color name="ops_talk">#3FB950</color>
+    <color name="ops_queue">#D29922</color>
+    <color name="ops_denied">#F85149</color>
+    <color name="ops_emergency">#FF4D4D</color>
+</resources>

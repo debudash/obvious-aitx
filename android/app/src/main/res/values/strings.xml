@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MCPTT</string>
+
+    <!-- Login -->
+    <string name="login_title">Mission-Critical PTT</string>
+    <string name="login_server">Server URL</string>
+    <string name="login_username">Username</string>
+    <string name="login_password">Password</string>
+    <string name="login_button">Sign in</string>
+    <string name="login_failed">Sign-in failed</string>
+
+    <!-- Talk -->
+    <string name="tab_talk">Talk</string>
+    <string name="tab_contacts">Contacts</string>
+    <string name="tab_alerts">Alerts</string>
+    <string name="tab_settings">Settings</string>
+    <string name="ptt_ready">Hold to talk</string>
+    <string name="ptt_requesting">Requesting floor…</string>
+    <string name="ptt_talking">Transmitting</string>
+    <string name="ptt_queued">In queue</string>
+    <string name="ptt_denied">Denied</string>
+    <string name="ptt_preempted">Pre-empted</string>
+    <string name="no_group_selected">Join a group call to talk</string>
+    <string name="start_group_call">Start group call</string>
+    <string name="join_active_call">Join active call</string>
+
+    <!-- Emergency -->
+    <string name="emergency_hold">Hold 1.5s for EMERGENCY</string>
+    <string name="emergency_confirm_title">Send emergency alert?</string>
+    <string name="emergency_confirm_message">Dispatch will be alerted immediately%s.</string>
+    <string name="emergency_confirm_call">Also start an emergency group call</string>
+    <string name="emergency_send">Send</string>
+    <string name="emergency_cancel">Cancel</string>
+    <string name="alert_pending_ack">Delivered — awaiting acknowledgement</string>
+    <string name="alert_retrying">Retrying delivery</string>
+    <string name="alert_failed">Delivery failed</string>
+    <string name="alert_acked">Acknowledged by dispatch</string>
+
+    <!-- Contacts -->
+    <string name="private_call">Private call</string>
+    <string name="missed_calls">Missed calls</string>
+    <string name="no_missed_calls">No missed calls</string>
+
+    <!-- Settings -->
+    <string name="affiliations">Affiliations</string>
+    <string name="priority_display">Priority</string>
+    <string name="functional_alias">Functional alias</string>
+    <string name="connection">Connection</string>
+    <string name="connection_connected">Connected</string>
+    <string name="connection_connecting">Connecting…</string>
+    <string name="connection_retrying">Reconnecting in %1$ds</string>
+    <string name="connection_offline">Offline</string>
+    <string name="logout">Sign out</string>
+
+    <!-- Notifications -->
+    <string name="ptt_channel_name">PTT session</string>
+    <string name="ptt_notification_title">MCPTT active</string>
+    <string name="ptt_notification_text">Push-to-talk service running</string>
+    <string name="btn_end">End call</string>
+    <string name="btn_join">Join</string>
+    <string name="btn_start">Start</string>
+    <string name="btn_call">Call</string>
+    <string name="speaker_none">Nobody speaking</string>
+    <string name="speaker_now">%1$s — speaking</string>
+    <string name="burst_remaining">%1$ds remaining</string>
+    <string name="queue_position">#%1$d in queue</string>
+    <string name="denied_reason">Denied — %1$s</string>
+    <string name="preempted_by">Pre-empted by %1$s</string>
+    <string name="group_members">%1$d members</string>
+    <string name="affiliated_label">Affiliated</string>
+    <string name="not_affiliated_label">Not affiliated</string>
+    <string name="ptt_no_call">No active call — start one above</string>
+</resources>
