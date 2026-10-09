@@ -53,16 +53,23 @@ foundation PR and consumed by every later client:
 | `FloorGranted`      | server → all     | arbitration result with the waiting queue      |
 | `FloorDenied`       | server → client  | rejected, with reason and queue position       |
 | `FloorReleased`     | client → server  | PTT released; queue head is auto-granted       |
+| `FloorReleased` (echo) | server → all  | the release echoed to the call, before the queue-head grant |
 | `FloorPreempted`    | server → all     | a higher-priority floor took the call mid-burst|
 | `FloorRevoke`       | dispatcher → srv | strip the current talker's floor               |
 | `CallStart`         | client → server  | open a group / private / broadcast call        |
-| `CallJoined`        | server → all     | a party joined (late entry)                    |
+| `CallJoined`        | client → server  | join a call the user may join (late entry)     |
+| `CallJoined` (broadcast) | server → all | a party joined                                |
 | `CallEnded`         | server → all     | call torn down                                 |
 | `EmergencyAlert`    | client → server  | one-tap alert with client-reported location    |
 | `PresenceUpdate`    | server → all     | a user connected to or dropped from `/ws`      |
 | `AffiliationChanged`| server → all     | a user's group affiliation changed             |
 | `MediaOffer`        | client → server  | WebRTC offer (`callId`, room `token`, `sdp` — exactly one sendrecv audio m-line: the client's microphone) |
 | `MediaAnswer`       | server → client  | SFU answer SDP binding the floor-audio track to that m-line, or empty `sdp` + `err` on rejection |
+
+The server dispatches every client → server type against the same
+authoritative call-control state the REST paths use. Identity, role, and
+priority always come from the verified `/ws` connection claims — the
+`userId`/`priority` fields on frames are never trusted.
 
 Go definitions: `server/internal/protocol` (wire types),
 `server/internal/floor` (priority ladder + `FloorController` interface), and
@@ -87,9 +94,10 @@ closed and its grant dropped, so it receives zero packets afterwards; a
 late joiner attaches to the live room and hears the current speaker
 immediately because the SFU forwards live, not a recording.
 
-The gate is currently fed at startup wiring only; the floor-engine PR
-replaces that with live controller decisions inside the call-control
-critical section (the `Apply`/`RevokeUser`/`Clear` contract is final).
+The gate is fed inside the call-control critical section by every
+arbitration path — REST actions and WS-dispatched frames alike — so a
+grant decided over the signaling socket is the same grant that opens the
+media relay (the `Apply`/`RevokeUser`/`Clear` contract is final).
 
 ## Carrier RX integration (flag-gated, off by default)
 
@@ -168,6 +176,9 @@ REST surface (auth unless noted): `POST /api/auth/login`,
 `POST|DELETE /api/groups/{id}/affiliations` (self if member, dispatcher for
 others), `GET /api/affiliations` (self, or any user for dispatchers),
 `GET /healthz` (open). `GET /ws?token=<jwt>` is the signaling socket.
+`POST /api/calls/{id}/media-token` mints the room-scoped media token a
+call participant presents with their `MediaOffer` (participant-gated,
+short-lived).
 
 ## Scope notes
 

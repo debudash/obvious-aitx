@@ -91,13 +91,19 @@ func run() error {
 
 	handler := ws.NewHandler(ws.NewHub(), tokens)
 	handler.SetSDPHandler(sfu)
+	handler.SetCallController(calls)
 
 	// Media consequences of dispatcher actions: removals and force-ends
 	// tear transports down server-side so removed parties stop receiving
-	// packets immediately.
+	// packets immediately. MintRoomToken is the reach the MediaOffer
+	// contract assumes: a call participant fetches a room-scoped token
+	// (POST /api/calls/{id}/media-token) and presents it with their offer.
 	mediaHooks := &api.MediaHooks{
 		RemoveParticipant: sfu.Remove,
 		EndCall:           sfu.EndCall,
+		MintRoomToken: func(callID, userID string) (string, error) {
+			return roomTokens.Issue(callID, userID, time.Now())
+		},
 	}
 
 	apiSrv := api.NewServer(st, tokens, handler, calls, mediaHooks)

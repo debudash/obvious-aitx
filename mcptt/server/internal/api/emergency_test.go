@@ -550,7 +550,7 @@ func TestDispatchBroadcast(t *testing.T) {
 // decisions carry queue position, and lifecycle events map to their
 // protocol frames.
 func TestRenderCallEvent(t *testing.T) {
-	frames := renderCallEvent(callcontrol.Event{
+	frames := ws.RenderCallEvent(callcontrol.Event{
 		Type: callcontrol.EventFloorDecisions, CallID: "c1",
 		Decisions: []floor.FloorDecision{
 			{UserID: "field", Outcome: floor.OutcomeGranted, Level: floor.PriorityEmergency, Emergency: true, PreemptedUserID: "sup"},
@@ -596,7 +596,7 @@ func TestRenderCallEvent(t *testing.T) {
 		{callcontrol.Event{Type: callcontrol.EventParticipantRemoved, CallID: "c1", Actor: "d1", Target: "u2"}, "ParticipantRemoved"},
 		{callcontrol.Event{Type: callcontrol.EventCallEnded, CallID: "c1", Actor: "d1"}, "CallEnded"},
 	} {
-		frames := renderCallEvent(tc.ev)
+		frames := ws.RenderCallEvent(tc.ev)
 		if len(frames) != 1 {
 			t.Fatalf("%s: %d frames", tc.ev.Type, len(frames))
 		}
@@ -610,7 +610,7 @@ func TestRenderCallEvent(t *testing.T) {
 	}
 
 	// Unknown event types render to nothing — no junk frames on the wire.
-	if frames := renderCallEvent(callcontrol.Event{Type: "bogus"}); frames != nil {
+	if frames := ws.RenderCallEvent(callcontrol.Event{Type: "bogus"}); frames != nil {
 		t.Fatalf("bogus event rendered %d frames", len(frames))
 	}
 }

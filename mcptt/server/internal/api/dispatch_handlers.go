@@ -22,12 +22,18 @@ import (
 // MediaHooks carry the media-plane consequences of dispatcher actions
 // without importing the SFU here: main.go wires the closures from the live
 // SFU. A removed participant's transport is dropped server-side — zero
-// further packets — and an ended call tears every leg down. Nil hooks (as
-// in control-plane-only tests) skip the media side; production always
-// wires them.
+// further packets — and an ended call tears every leg down. MintRoomToken
+// issues the room-scoped media token a call participant presents with
+// their MediaOffer (the mint the MediaOffer contract expects clients to
+// be able to reach). Nil hooks (as in control-plane-only tests) skip the
+// media side; production always wires them.
 type MediaHooks struct {
 	RemoveParticipant func(callID, userID string) bool
 	EndCall           func(callID string) int
+	// MintRoomToken issues a room-scoped media token binding this call
+	// and this user. Wired from the SFU's RoomTokens at startup; the
+	// media-token route answers 503 when unset.
+	MintRoomToken func(callID, userID string) (string, error)
 }
 
 // broadcastRequest starts a dispatcher announcement call to one group.

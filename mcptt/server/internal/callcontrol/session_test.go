@@ -375,6 +375,23 @@ func TestSessionEvents(t *testing.T) {
 	if n := log.count(EventFloorDecisions); n != 3 { // grant, queue, head grant
 		t.Fatalf("floor events = %d, want 3", n)
 	}
+	// The release echo goes out first, then the queue-head grant — the
+	// wire contract's cause-before-effect for a PTT-up.
+	if n := log.count(EventFloorReleased); n != 1 {
+		t.Fatalf("release events = %d, want 1", n)
+	}
+	for i, ev := range evs {
+		if ev.Type != EventFloorReleased {
+			continue
+		}
+		if ev.Actor != "a" {
+			t.Fatalf("release event actor = %q, want a", ev.Actor)
+		}
+		if i+1 >= len(evs) || evs[i+1].Type != EventFloorDecisions || len(evs[i+1].Decisions) == 0 {
+			t.Fatalf("release at %d not followed by the head-grant decision event", i)
+		}
+		break
+	}
 }
 
 // TestExpiryFlowsThroughSession: a burst past its bound auto-releases
