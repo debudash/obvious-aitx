@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/debudash/obvious-aitx/mcptt/server/integration"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/api"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/auth"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/callcontrol"
@@ -64,6 +65,27 @@ func run() error {
 			return aff.State == store.AffiliationAffiliated
 		},
 	})
+
+	// Carrier RX integration (spec: flag-gated, off by default). Disabled →
+	// NewFromConfig returns nil: no adapter, no socket, no tap is ever
+	// constructed, which is the flag-off guarantee of zero external sockets.
+	// When on, the bridge mirrors what the manager already arbitrated:
+	// session events via SetOnEvent, and each call's owning talkgroup via
+	// the manager's GroupOf resolver (events carry GroupID; the resolver is
+	// only the fallback for events without one).
+	carrierBridge, err := integration.NewFromConfig(cfg.Carrier, integration.BridgeOptions{
+		GroupOf: calls.GroupOf,
+	})
+	if err != nil {
+		return err
+	}
+	if carrierBridge != nil {
+		calls.SetOnEvent(carrierBridge.HandleEvent)
+		carrierBridge.AttachSFU(sfu)
+		defer carrierBridge.Close()
+		log.Printf("carrier: rx integration enabled (adapter=%s codec=%s groups=%d events_url=%v)",
+			cfg.Carrier.Adapter, cfg.Carrier.Codec, len(cfg.Carrier.Groups), cfg.Carrier.EventsURL != "")
+	}
 
 	handler := ws.NewHandler(ws.NewHub(), tokens)
 	handler.SetSDPHandler(sfu)

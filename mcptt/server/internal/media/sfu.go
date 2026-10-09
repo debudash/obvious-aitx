@@ -27,6 +27,7 @@ const (
 type SFU struct {
 	tokens *RoomTokens
 	gate   *Gate
+	taps   tapRegistry
 
 	mu    sync.Mutex
 	rooms map[string]*room
@@ -35,6 +36,26 @@ type SFU struct {
 // NewSFU wires the SFU to the floor gate and room tokens it reads.
 func NewSFU(gate *Gate, tokens *RoomTokens) *SFU {
 	return &SFU{tokens: tokens, gate: gate, rooms: make(map[string]*room)}
+}
+
+// RegisterTap attaches a carrier tap to one call's forwarded audio. The tap
+// mirrors exactly the packets the gate lets the SFU relay — a granted
+// talker's bursts — and nothing else; for an un-tapped call it adds one
+// map lookup per relayed packet. The returned func unregisters the tap.
+// Taps are load-shedding by contract (TapWriter): they never stall relay.
+func (s *SFU) RegisterTap(callID string, w TapWriter) func() {
+	return s.taps.register(callID, w)
+}
+
+// writeTaps mirrors one granted packet to the call's taps (relay path).
+func (s *SFU) writeTaps(callID, userID string, pkt *rtp.Packet) {
+	s.taps.write(callID, userID, packetView{
+		ssrc:        pkt.SSRC,
+		seq:         pkt.SequenceNumber,
+		timestamp:   pkt.Timestamp,
+		payloadType: pkt.PayloadType,
+		payload:     pkt.Payload,
+	})
 }
 
 // HandleOffer processes one client WebRTC offer for callID and returns the
@@ -84,7 +105,13 @@ func (s *SFU) joinAndAnswer(callID, userID string, pc *webrtc.PeerConnection, of
 		r.drop(userID, p)
 		return "", fmt.Errorf("media: floor track: %w", err)
 	}
+	// Publish the outbound track under the room write lock: forward reads
+	// q.out under the matching read lock, and r.join has already made this
+	// peer visible to fan-out — an unlocked write here raced the relay and
+	// could hand it a nil track.
+	r.mu.Lock()
 	p.out = out
+	r.mu.Unlock()
 
 	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offerSDP}
 	if err := pc.SetRemoteDescription(offer); err != nil {
@@ -139,6 +166,7 @@ func (s *SFU) relay(r *room, p *peer, remote *webrtc.TrackRemote) {
 			continue
 		}
 		r.forward(p, pkt)
+		s.writeTaps(r.id, p.userID, pkt)
 	}
 }
 
@@ -157,8 +185,8 @@ func (r *room) forward(from *peer, pkt *rtp.Packet) {
 		return
 	}
 	for _, q := range r.peers {
-		if q == from {
-			continue
+		if q == from || q.out == nil {
+			continue // mid-negotiation joiner: answer not complete, nothing to write into
 		}
 		out := *pkt // private header per listener; payload is shared
 		q.rw.rewrite(&out.Header)
@@ -198,6 +226,7 @@ func (s *SFU) EndCall(callID string) int {
 	r := s.rooms[callID]
 	delete(s.rooms, callID)
 	s.mu.Unlock()
+	s.taps.drop(callID) // a call's taps never outlive its room
 	if r == nil {
 		return 0
 	}

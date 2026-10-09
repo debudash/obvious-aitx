@@ -57,9 +57,9 @@ const (
 type Event struct {
 	Type      EventType
 	CallID    string
+	GroupID   string // owning talkgroup; empty for private calls and unresolved calls
 	Actor     string
 	Target    string
-	GroupID   string
 	Kind      CallKind
 	Decisions []floor.FloorDecision
 	Queue     []string
@@ -240,7 +240,7 @@ func (sm *SessionManager) startLocked(kind CallKind, groupID, initiator string, 
 		cfg.OnExpired = func(holder string, ds []floor.FloorDecision) {
 			sm.onEvent(Event{
 				Type: EventFloorDecisions, CallID: id, Actor: holder,
-				Kind: kind, Decisions: ds,
+				Kind: kind, GroupID: groupID, Decisions: ds,
 			})
 		}
 		s.machine = newFloorMachine(cfg)
@@ -283,7 +283,7 @@ func (sm *SessionManager) Join(callID, userID string, priority floor.FloorLevel)
 	}
 	s.participants[userID] = &participant{priority: priority, joinedAt: time.Now()}
 	info := sm.snapshotLocked(s)
-	sm.onEvent(Event{Type: EventParticipantJoined, CallID: callID, Actor: userID, Kind: s.kind})
+	sm.onEvent(Event{Type: EventParticipantJoined, CallID: callID, Actor: userID, Kind: s.kind, GroupID: s.groupID})
 	return info, nil
 }
 
@@ -309,7 +309,7 @@ func (sm *SessionManager) RequestFloor(callID, userID string, emergency bool) (f
 		d := sm.directGrantLocked(s, userID, p.priority)
 		sm.writeGate(callID, []floor.FloorDecision{d}) // same critical section as the token
 		sm.mu.Unlock()
-		sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: s.kind, Decisions: []floor.FloorDecision{d}})
+		sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: s.kind, GroupID: s.groupID, Decisions: []floor.FloorDecision{d}})
 		return d, nil
 	}
 	if s.kind == KindBroadcast && p.priority < floor.PriorityDispatcher {
@@ -318,13 +318,13 @@ func (sm *SessionManager) RequestFloor(callID, userID string, emergency bool) (f
 			Level: p.priority, Reason: "listen-only",
 		}
 		sm.mu.Unlock()
-		sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: s.kind, Decisions: []floor.FloorDecision{d}})
+		sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: s.kind, GroupID: s.groupID, Decisions: []floor.FloorDecision{d}})
 		return d, nil
 	}
 	decision := s.machine.Request(userID, p.priority, emergency)
 	queue := s.machine.QueueUserIDs()
 	sm.mu.Unlock()
-	sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: s.kind, Decisions: []floor.FloorDecision{decision}, Queue: queue})
+	sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: s.kind, GroupID: s.groupID, Decisions: []floor.FloorDecision{decision}, Queue: queue})
 	return decision, nil
 }
 
@@ -367,7 +367,7 @@ func (sm *SessionManager) ReleaseFloor(callID, userID string) ([]floor.FloorDeci
 	sm.mu.Unlock()
 	// Always emitted — even with empty decisions — so the wiring echoes the
 	// release (and queue cancellation) to every client.
-	sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: kind, Decisions: decisions})
+	sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: userID, Kind: kind, GroupID: s.groupID, Decisions: decisions})
 	return decisions, nil
 }
 
@@ -390,7 +390,7 @@ func (sm *SessionManager) RevokeFloor(callID, target, by string, byLevel floor.F
 	kind := s.kind
 	sm.mu.Unlock()
 	if err == nil && len(decisions) > 0 {
-		sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: by, Kind: kind, Decisions: decisions})
+		sm.onEvent(Event{Type: EventFloorDecisions, CallID: callID, Actor: by, Kind: kind, GroupID: s.groupID, Decisions: decisions})
 	}
 	return decisions, err
 }
@@ -428,7 +428,7 @@ func (sm *SessionManager) RemoveParticipant(callID, target, by string, byLevel f
 	delete(s.participants, target)
 	kind := s.kind
 	sm.mu.Unlock()
-	sm.onEvent(Event{Type: EventParticipantRemoved, CallID: callID, Actor: by, Target: target, Kind: kind, Decisions: decisions})
+	sm.onEvent(Event{Type: EventParticipantRemoved, CallID: callID, Actor: by, Target: target, Kind: kind, GroupID: s.groupID, Decisions: decisions})
 	return decisions, nil
 }
 
@@ -533,9 +533,9 @@ func (sm *SessionManager) Leave(callID, userID string) ([]floor.FloorDecision, e
 		delete(sm.calls, callID)
 	}
 	sm.mu.Unlock()
-	sm.onEvent(Event{Type: EventParticipantLeft, CallID: callID, Actor: userID, Kind: kind, Decisions: decisions})
+	sm.onEvent(Event{Type: EventParticipantLeft, CallID: callID, Actor: userID, Kind: kind, GroupID: s.groupID, Decisions: decisions})
 	if ended {
-		sm.onEvent(Event{Type: EventCallEnded, CallID: callID, Actor: userID, Kind: kind})
+		sm.onEvent(Event{Type: EventCallEnded, CallID: callID, Actor: userID, Kind: kind, GroupID: s.groupID})
 	}
 	return decisions, nil
 }
@@ -556,7 +556,7 @@ func (sm *SessionManager) End(callID, by string) error {
 	kind := s.kind
 	delete(sm.calls, callID)
 	sm.mu.Unlock()
-	sm.onEvent(Event{Type: EventCallEnded, CallID: callID, Actor: by, Kind: kind})
+	sm.onEvent(Event{Type: EventCallEnded, CallID: callID, Actor: by, Kind: kind, GroupID: s.groupID})
 	return nil
 }
 
@@ -602,4 +602,27 @@ func (sm *SessionManager) Count() int {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	return len(sm.calls)
+}
+
+// GroupOf reports a live call's talkgroup: the resolver the carrier RX
+// bridge uses to apply the [carrier] groups allowlist. Private calls and
+// unknown calls resolve to no group. Never blocks on the manager mutex:
+// the manager invokes some session-event callbacks with its own lock held
+// (call starts), so this returns "no group" on contention instead of
+// deadlocking a callback that re-enters it.
+func (sm *SessionManager) GroupOf(callID string) (string, bool) {
+	// TryLock, not Lock: the manager emits some events (call starts) with
+	// its own lock held, and the carrier bridge's event callback resolves
+	// groups as a fallback. A blocking lookup there would self-deadlock;
+	// on contention the caller treats the call as unflagged, which the
+	// event's own GroupID field makes irrelevant for flagged calls.
+	if !sm.mu.TryLock() {
+		return "", false
+	}
+	defer sm.mu.Unlock()
+	s, ok := sm.calls[callID]
+	if !ok || s.kind == KindPrivate || s.groupID == "" {
+		return "", false
+	}
+	return s.groupID, true
 }
