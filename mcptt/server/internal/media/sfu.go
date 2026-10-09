@@ -145,9 +145,11 @@ func (s *SFU) relay(r *room, p *peer, remote *webrtc.TrackRemote) {
 // forward relays one packet from speaker p to every other participant. The
 // room's read lock makes fan-out mutually exclusive with removal (write
 // lock), so a participant deleted from the map is never written to again.
-// Write errors are inherent to best-effort real-time transport — a listener
-// whose link is dying misses bursts until its state handler removes it, and
-// there is no retransmit for live audio.
+// Each listener gets a private header stamped by its stream rewriter —
+// speaker swaps must be invisible at the transport layer. Write errors are
+// inherent to best-effort real-time transport — a listener whose link is
+// dying misses bursts until its state handler removes it, and there is no
+// retransmit for live audio.
 func (r *room) forward(from *peer, pkt *rtp.Packet) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -158,7 +160,9 @@ func (r *room) forward(from *peer, pkt *rtp.Packet) {
 		if q == from {
 			continue
 		}
-		_ = q.out.WriteRTP(pkt)
+		out := *pkt // private header per listener; payload is shared
+		q.rw.rewrite(&out.Header)
+		_ = q.out.WriteRTP(&out)
 	}
 }
 
@@ -299,4 +303,7 @@ type peer struct {
 	userID string
 	pc     *webrtc.PeerConnection
 	out    *webrtc.TrackLocalStaticRTP
+	// rw stamps forwarded packets into this listener's continuous
+	// outbound stream; see streamRewriter.
+	rw streamRewriter
 }

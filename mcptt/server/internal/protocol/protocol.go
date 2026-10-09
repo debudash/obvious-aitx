@@ -24,6 +24,12 @@ const (
 
 	TypeEmergencyAlert = "EmergencyAlert"
 
+	// Emergency/dispatch additions: a dispatcher removed a participant
+	// from a live call, and an alert was acknowledged from the emergency
+	// rail.
+	TypeParticipantRemoved = "ParticipantRemoved"
+	TypeEmergencyAlertAck  = "EmergencyAlertAck"
+
 	// Foundation-live types: presence and affiliation fan-out on /ws.
 	TypePresenceUpdate     = "PresenceUpdate"
 	TypeAffiliationChanged = "AffiliationChanged"
@@ -136,18 +142,37 @@ type CallEnded struct {
 	By     string `json:"by"`
 }
 
+// ParticipantRemoved — server → all: a dispatcher stripped one party from
+// a live call; their media leg is dropped server-side (zero further
+// packets).
+type ParticipantRemoved struct {
+	Type   string `json:"type"`
+	CallID string `json:"callId"`
+	UserID string `json:"userId"`
+	By     string `json:"by"`
+}
+
 // EmergencyAlert — client → server: one-tap alert (voiceless) or the alert
 // that accompanies an emergency call. Location is client-reported
 // (lat/lon WGS-84) and omitted when the device has no fix.
 type EmergencyAlert struct {
-	Type      string   `json:"type"`
-	AlertID   string   `json:"alertId"`
-	UserID    string   `json:"userId"`
-	CallID    string   `json:"callId,omitempty"` // empty for a voiceless alert
-	Lat       *float64 `json:"lat,omitempty"`
-	Lon       *float64 `json:"lon,omitempty"`
-	Emergency bool     `json:"emergency"`
-	Note      string   `json:"note,omitempty"`
+	Type          string   `json:"type"`
+	AlertID       string   `json:"alertId"`
+	UserID        string   `json:"userId"`
+	CallID        string   `json:"callId,omitempty"` // empty for a voiceless alert
+	Lat           *float64 `json:"lat,omitempty"`
+	Lon           *float64 `json:"lon,omitempty"`
+	Emergency     bool     `json:"emergency"`
+	ImminentPeril bool     `json:"imminentPeril,omitempty"`
+	Note          string   `json:"note,omitempty"`
+}
+
+// EmergencyAlertAck — server → all: a dispatcher acknowledged an alert;
+// the emergency rail clears it into the archive.
+type EmergencyAlertAck struct {
+	Type           string `json:"type"`
+	AlertID        string `json:"alertId"`
+	AcknowledgedBy string `json:"acknowledgedBy"`
 }
 
 // PresenceState values for PresenceUpdate.

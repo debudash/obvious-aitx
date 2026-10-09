@@ -14,6 +14,7 @@ import (
 
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/api"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/auth"
+	"github.com/debudash/obvious-aitx/mcptt/server/internal/callcontrol"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/config"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/media"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/store"
@@ -40,18 +41,47 @@ func run() error {
 	tokens := auth.NewTokenizer(cfg.JWTSecret, cfg.JWTTTL)
 
 	// Media plane: same process, same signing secret; room tokens carry a
-	// separate claim set so access tokens never admit a media room. The
-	// gate is fed by the control plane's floor-controller wiring.
+	// separate claim set so access tokens never admit a media room.
 	mediaGate := media.NewGate()
 	roomTokens := media.NewRoomTokens(cfg.JWTSecret, media.DefaultRoomTokenTTL)
 	sfu := media.NewSFU(mediaGate, roomTokens)
 
+	// Control plane: one authoritative session manager. Floor transitions
+	// mirror into the gate inside the same critical section that decides
+	// them (the spec's boundary invariant), and every event fans out to
+	// connected clients through the api layer's renderer.
+	calls := callcontrol.NewSessionManager(callcontrol.SessionConfig{
+		MaxTalkDuration: cfg.MaxTalkDuration,
+		Media:           mediaGate,
+		Affiliation: func(userID, groupID string) bool {
+			aff, err := st.AffiliationState(context.Background(), userID, groupID)
+			if err != nil {
+				// Deny on failure — the affiliation store, not the
+				// client, decides who may join.
+				log.Printf("mcptt: affiliation check %s@%s: %v", userID, groupID, err)
+				return false
+			}
+			return aff.State == store.AffiliationAffiliated
+		},
+	})
+
 	handler := ws.NewHandler(ws.NewHub(), tokens)
 	handler.SetSDPHandler(sfu)
 
+	// Media consequences of dispatcher actions: removals and force-ends
+	// tear transports down server-side so removed parties stop receiving
+	// packets immediately.
+	mediaHooks := &api.MediaHooks{
+		RemoveParticipant: sfu.Remove,
+		EndCall:           sfu.EndCall,
+	}
+
+	apiSrv := api.NewServer(st, tokens, handler, calls, mediaHooks)
+	calls.SetOnEvent(apiSrv.HandleCallEvent)
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           withLogging(api.New(st, tokens, handler)),
+		Handler:           withLogging(apiSrv.Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

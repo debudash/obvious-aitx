@@ -101,10 +101,26 @@ CREATE TABLE IF NOT EXISTS audit_log (
 	created_at  TEXT NOT NULL                       -- Postgres: TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS emergency_alerts (
+	id               TEXT PRIMARY KEY,
+	user_id          TEXT NOT NULL REFERENCES users(id),
+	call_id          TEXT NOT NULL DEFAULT '',  -- empty: voiceless alert
+	kind             TEXT NOT NULL CHECK (kind IN ('emergency','imminent_peril')),
+	lat              REAL,                      -- NULL: no client-reported fix
+	lon              REAL,                      -- NULL: no client-reported fix
+	note             TEXT NOT NULL DEFAULT '',
+	status           TEXT NOT NULL CHECK (status IN ('active','acknowledged')),
+	acknowledged_by  TEXT REFERENCES users(id),
+	acknowledged_at  TEXT,                      -- Postgres: TIMESTAMPTZ
+	created_at       TEXT NOT NULL              -- Postgres: TIMESTAMPTZ
+);
+
 CREATE INDEX IF NOT EXISTS idx_memberships_user   ON memberships(user_id);
 CREATE INDEX IF NOT EXISTS idx_affiliations_user  ON affiliations(user_id);
 CREATE INDEX IF NOT EXISTS idx_affiliations_group ON affiliations(group_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created      ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_alerts_status      ON emergency_alerts(status);
+CREATE INDEX IF NOT EXISTS idx_alerts_user        ON emergency_alerts(user_id);
 `
 	if _, err := s.db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
