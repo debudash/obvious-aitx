@@ -1,0 +1,43 @@
+name: MCPTT CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["mcptt/**"]
+  push:
+    branches: [main]
+    paths: ["mcptt/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Go server (build, lint, race tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcptt/server
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.2"
+          cache-dependency-path: mcptt/server/go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Lint (gofmt + go vet)
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+          go vet ./...
+
+      - name: Tests (race detector)
+        run: go test -race ./...
