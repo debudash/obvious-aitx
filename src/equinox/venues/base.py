@@ -37,6 +37,12 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 MAX_RETRIES = 3
 """Retries after the initial attempt (spec: "Retry ×3") — 4 attempts total."""
 
+MAX_PAGE_FAILURES = 4
+"""Failed pages one adapter tolerates inside a single collect() call before
+returning early with what it has. Bounds a fully-down venue: without the cap,
+an offset adapter that never charges the limit for a lost page would loop
+forever. Four lost pages = the venue is down, say so and go home."""
+
 BACKOFF_BASE_SECONDS = 0.5
 """Base delay; retry *n* waits ``base * 2**(n-1)`` seconds (0.5, 1.0, 2.0)."""
 
@@ -327,6 +333,9 @@ class BaseVenueAdapter:
                 # Page lost after retries: record it, keep the venue honest
                 # (degraded), and either advance past it or stop pagination —
                 # a subclass flag, because the next-page pointer determines it.
+                # The lost page does not charge the caller's limit: the caller
+                # asked for *limit* markets, and they may sit at the next
+                # offset. MAX_PAGE_FAILURES bounds a venue that stays down.
                 errors.append(
                     FetchError(
                         venue=self.venue,
@@ -336,9 +345,8 @@ class BaseVenueAdapter:
                     )
                 )
                 pages_failed += 1
-                if not self.continue_after_page_failure:
+                if not self.continue_after_page_failure or pages_failed >= MAX_PAGE_FAILURES:
                     break
-                consumed += budget
                 page_state = self.advance_after_failure(page_state, budget)
                 continue
 
@@ -484,6 +492,7 @@ def collect_snapshot(
 __all__ = [
     "BACKOFF_BASE_SECONDS",
     "DEFAULT_TIMEOUT_SECONDS",
+    "MAX_PAGE_FAILURES",
     "MAX_RETRIES",
     "BaseVenueAdapter",
     "CollectResult",

@@ -16,6 +16,7 @@ from equinox.model import FeeParams, Market, MarketSnapshot, Outcome
 from equinox.venues.base import (
     BACKOFF_BASE_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,
+    MAX_PAGE_FAILURES,
     BaseVenueAdapter,
     CollectResult,
     FetchFailure,
@@ -231,7 +232,10 @@ class TestCollectPlumbing:
         assert result.degraded is True
         assert result.errors[0].attempts == 4
         assert result.errors[0].cause == "HTTP 503 from stub"
-        assert result.pages_failed == 1
+        # The offset venue keeps advancing until MAX_PAGE_FAILURES says the
+        # venue is down — four lost pages, then stop and report.
+        assert result.pages_failed == MAX_PAGE_FAILURES
+        assert len(result.errors) == MAX_PAGE_FAILURES
 
     def test_cursor_adapter_stops_after_page_failure(self):
         adapter = FailingOnceCursorAdapter(
