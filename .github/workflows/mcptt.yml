@@ -41,3 +41,24 @@ jobs:
 
       - name: Tests (race detector)
         run: go test -race ./...
+
+  ios-core:
+    # The Linux-testable half of the iOS client: MCPTTCore (protocol codecs,
+    # floor reducer, stores, resilience) has no Apple-only imports, so the
+    # official Swift container builds and tests it. The SwiftUI/WebRTC app
+    # layer needs Xcode and is a documented follow-up (mcptt/ios/README.md).
+    name: iOS core (Swift build + tests)
+    runs-on: ubuntu-latest
+    container: swift:6.0.3-jammy
+    defaults:
+      run:
+        working-directory: mcptt/ios
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build
+
+      - name: Tests
+        run: swift test
