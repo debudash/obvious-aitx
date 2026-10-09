@@ -25,9 +25,10 @@ const (
 
 // Client is one authenticated WSS connection.
 type Client struct {
-	hub    *Hub
-	userID string
-	conn   *websocket.Conn
+	hub     *Hub
+	handler *Handler // inbound message dispatch; set by ServeHTTP
+	userID  string
+	conn    *websocket.Conn
 	// send is never closed: a closed channel would turn a racing enqueue
 	// (Broadcast snapshot vs removal) into a panic. The done channel is what
 	// writePump exits on, and the hub closes it under its own lock.
@@ -50,7 +51,20 @@ func (c *Client) enqueue(msg []byte) {
 type Handler struct {
 	hub    *Hub
 	tokens *auth.Tokenizer
+	// sdp is the media plane (the SFU); nil until SetSDPHandler wires it in.
+	sdp SDPHandler
 }
+
+// SDPHandler answers one media-plane offer for a call. Implemented by the
+// media SFU; the connection's userID is the authenticated WSS identity and
+// must be bound by the room token too.
+type SDPHandler interface {
+	HandleOffer(callID, userID, token, offerSDP string) (answerSDP string, err error)
+}
+
+// SetSDPHandler wires the media plane in. Call once at startup, before the
+// HTTP server begins serving — not safe for concurrent use.
+func (h *Handler) SetSDPHandler(sdp SDPHandler) { h.sdp = sdp }
 
 func NewHandler(hub *Hub, tokens *auth.Tokenizer) *Handler {
 	return &Handler{hub: hub, tokens: tokens}
@@ -73,11 +87,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c := &Client{
-		hub:    h.hub,
-		userID: claims.Subject,
-		conn:   conn,
-		send:   make(chan []byte, sendBuffer),
-		done:   make(chan struct{}),
+		hub:     h.hub,
+		handler: h,
+		userID:  claims.Subject,
+		conn:    conn,
+		send:    make(chan []byte, sendBuffer),
+		done:    make(chan struct{}),
 	}
 	h.hub.Add(c)
 	defer func() {
@@ -101,6 +116,39 @@ func (h *Handler) BroadcastAffiliationChanged(userID, groupID, state string) {
 		return
 	}
 	h.hub.Broadcast(msg)
+}
+
+// dispatchInbound routes one client frame. Media offers go to the SDP
+// handler in a goroutine — answering blocks on ICE gathering, and a read
+// pump that stalled there would delay the connection's other frames. Any
+// unknown, malformed, or unexpected type is dropped silently: the same
+// forward-compatible wire behavior the foundation pinned, and per-frame
+// replies ride the client's own outbound queue.
+func (h *Handler) dispatchInbound(c *Client, raw []byte) {
+	typ, err := protocol.ParseType(raw)
+	if err != nil || typ != protocol.TypeMediaOffer || h.sdp == nil {
+		return
+	}
+	var offer protocol.MediaOffer
+	if err := json.Unmarshal(raw, &offer); err != nil || offer.CallID == "" {
+		return
+	}
+	userID := c.userID
+	go func() {
+		answerSDP, err := h.sdp.HandleOffer(offer.CallID, userID, offer.Token, offer.SDP)
+		resp := protocol.MediaAnswer{Type: protocol.TypeMediaAnswer, CallID: offer.CallID}
+		if err != nil {
+			resp.Err = err.Error()
+		} else {
+			resp.SDP = answerSDP
+		}
+		msg, merr := json.Marshal(resp)
+		if merr != nil {
+			log.Printf("ws: marshal media answer: %v", merr)
+			return
+		}
+		c.enqueue(msg)
+	}()
 }
 
 // broadcastPresence publishes a presence transition to everyone.

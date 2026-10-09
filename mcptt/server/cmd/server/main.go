@@ -15,6 +15,7 @@ import (
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/api"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/auth"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/config"
+	"github.com/debudash/obvious-aitx/mcptt/server/internal/media"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/store"
 	"github.com/debudash/obvious-aitx/mcptt/server/internal/ws"
 )
@@ -37,7 +38,16 @@ func run() error {
 	defer st.Close()
 
 	tokens := auth.NewTokenizer(cfg.JWTSecret, cfg.JWTTTL)
+
+	// Media plane: same process, same signing secret; room tokens carry a
+	// separate claim set so access tokens never admit a media room. The
+	// gate is fed by the control plane's floor-controller wiring.
+	mediaGate := media.NewGate()
+	roomTokens := media.NewRoomTokens(cfg.JWTSecret, media.DefaultRoomTokenTTL)
+	sfu := media.NewSFU(mediaGate, roomTokens)
+
 	handler := ws.NewHandler(ws.NewHub(), tokens)
+	handler.SetSDPHandler(sfu)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,

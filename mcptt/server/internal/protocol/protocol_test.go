@@ -22,6 +22,8 @@ func TestTypeConstants(t *testing.T) {
 		"EmergencyAlert":     TypeEmergencyAlert,
 		"PresenceUpdate":     TypePresenceUpdate,
 		"AffiliationChanged": TypeAffiliationChanged,
+		"MediaOffer":         TypeMediaOffer,
+		"MediaAnswer":        TypeMediaAnswer,
 	}
 	for want, got := range cases {
 		if got != want {

@@ -14,7 +14,7 @@ README is the developer orientation.
 
 | Path        | Contents                                                        |
 | ----------- | --------------------------------------------------------------- |
-| `server/`   | Go module: HTTP/WSS control plane, SQLite store, floor contract |
+| `server/`   | Go module: HTTP/WSS control plane, SQLite store, floor contract, media plane (Pion SFU) |
 | `web/`      | React dispatcher console (reserved — console PR)                |
 | `android/`  | Kotlin field client (reserved — mobile PR)                      |
 | `ios/`      | Swift field client (reserved — mobile PR)                       |
@@ -61,9 +61,35 @@ foundation PR and consumed by every later client:
 | `EmergencyAlert`    | client → server  | one-tap alert with client-reported location    |
 | `PresenceUpdate`    | server → all     | a user connected to or dropped from `/ws`      |
 | `AffiliationChanged`| server → all     | a user's group affiliation changed             |
+| `MediaOffer`        | client → server  | WebRTC offer (`callId`, room `token`, `sdp` — exactly one sendrecv audio m-line: the client's microphone) |
+| `MediaAnswer`       | server → client  | SFU answer SDP binding the floor-audio track to that m-line, or empty `sdp` + `err` on rejection |
 
-Go definitions: `server/internal/protocol` (wire types) and
-`server/internal/floor` (priority ladder + `FloorController` interface).
+Go definitions: `server/internal/protocol` (wire types),
+`server/internal/floor` (priority ladder + `FloorController` interface), and
+`server/internal/media` (SFU).
+
+### Media plane
+
+`server/internal/media` hosts the Pion SFU. One room per call, one transport
+per participant, Opus 48 kHz as the single negotiated codec, DTLS-SRTP per
+hop (the spec's documented security deviation). Signaling is offer/answer on
+the WSS channel (`MediaOffer`/`MediaAnswer` above); the room-scoped token
+binding caller and call is minted per call and verified before any SDP is
+processed — the token issuer is separate from the access-token issuer, so an
+access token never admits a media room.
+
+Forwarding is grant-gated: a participant's upstream packets reach the other
+listeners only while the **floor gate** — an in-process mirror the control
+plane feeds exclusively with `floor.FloorDecision` results — marks that
+participant granted. Pre-emption removes the displaced talker's grant in the
+same step that grants the winner; a removed participant's transport is
+closed and its grant dropped, so it receives zero packets afterwards; a
+late joiner attaches to the live room and hears the current speaker
+immediately because the SFU forwards live, not a recording.
+
+The gate is currently fed at startup wiring only; the floor-engine PR
+replaces that with live controller decisions inside the call-control
+critical section (the `Apply`/`RevokeUser`/`Clear` contract is final).
 
 ## Running
 
