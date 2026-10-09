@@ -1,0 +1,36 @@
+# XcodeGen spec — generates MCPTT.xcodeproj. Run `xcodegen generate` in this
+# directory on a macOS machine (documented follow-up in ../README.md).
+name: MCPTT
+options:
+  bundleIdPrefix: ai.obvious.mcptt
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  MCPTTCore:
+    path: ..
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    from: "130.0.0"
+targets:
+  MCPTT:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Resources
+    dependencies:
+      - package: MCPTTCore
+      - package: WebRTC
+    info:
+      path: Resources/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        NSLocationWhenInUseUsageDescription:
+          Location is attached to emergency alerts so dispatch can find you.
+        NSMicrophoneUsageDescription:
+          The microphone transmits your talk bursts during push-to-talk calls.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    # No entitlements block: background audio is Info.plist UIBackgroundModes
+    # (already set), and microphone/location prompts are usage descriptions.
