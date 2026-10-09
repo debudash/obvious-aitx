@@ -1,0 +1,59 @@
+"""Structural purity guards for the matching and routing layers.
+
+The PRD requires venue-free, I/O-free matching and routing. Rather than trust
+convention, the import graph is enforced statically: the pure packages must
+never import the venue adapters or HTTP machinery.
+
+Static AST analysis; dynamic ``importlib`` calls with computed names are out
+of scope for the spike.
+"""
+
+import ast
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / "src" / "equinox"
+PKG_ROOT = SRC_ROOT.parent  # src/, the root for resolving relative imports
+
+PURE_PACKAGES = ("matching", "routing")
+FORBIDDEN_IMPORTS = ("requests", "urllib", "equinox.venues")
+
+
+def _import_targets(path: Path) -> set[str]:
+    """Full dotted module names imported by *path*, relatives resolved."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    package = path.relative_to(PKG_ROOT).with_suffix("").parts[:-1]
+    targets: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            targets.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:  # relative import: resolve against this file's package
+                base = package[: len(package) - (node.level - 1)]
+                resolved = (*base, node.module) if node.module else base
+                targets.add(".".join(resolved))
+            elif node.module:
+                targets.add(node.module)
+    return targets
+
+
+def _is_forbidden(module: str) -> bool:
+    return any(module == name or module.startswith(name + ".") for name in FORBIDDEN_IMPORTS)
+
+
+@pytest.mark.parametrize("package", PURE_PACKAGES)
+def test_pure_packages_never_import_io_or_venues(package: str) -> None:
+    package_dir = SRC_ROOT / package
+    assert package_dir.is_dir(), f"pure package directory missing: {package_dir}"
+    files = sorted(package_dir.rglob("*.py"))
+    assert files, f"no python files found in pure package: {package_dir}"
+
+    violations = [
+        f"{path.relative_to(REPO_ROOT)} imports {module}"
+        for path in files
+        for module in sorted(_import_targets(path))
+        if _is_forbidden(module)
+    ]
+    assert not violations, "forbidden imports in pure layer:\n" + "\n".join(violations)
