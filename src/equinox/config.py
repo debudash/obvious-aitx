@@ -32,6 +32,7 @@ class MatchConfig:
 
     rare_token_max_doc_freq: float = 0.05
     date_block_window_days: int = 7
+    date_proximity_scale_days: float = 7.0
     weight_token_overlap: float = 0.40
     weight_idf_overlap: float = 0.30
     weight_numeric_agreement: float = 0.20
@@ -48,6 +49,13 @@ class MatchConfig:
         if self.date_block_window_days < 0:
             raise ValueError(
                 f"date_block_window_days must be >= 0, got {self.date_block_window_days!r}"
+            )
+        if isinstance(self.date_proximity_scale_days, bool) or not isinstance(
+            self.date_proximity_scale_days, (int, float)
+        ) or self.date_proximity_scale_days <= 0:
+            raise ValueError(
+                f"date_proximity_scale_days must be a positive number, "
+                f"got {self.date_proximity_scale_days!r}"
             )
         weights = {
             "token_overlap": self.weight_token_overlap,
