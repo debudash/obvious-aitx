@@ -1,0 +1,124 @@
+{
+  "equivalent": [
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0xce610556ec78cfd7894f4169d91fe70e31c2fb49f927fffd7fe7d06530f88d56",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "KXFRENCHPRES-27-DLIS",
+        "venue": "kalshi"
+      },
+      "note": "Same event: Lisnard wins 2027 French presidential election; venue texts are verbatim-identical."
+    },
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0x6189539ff1b08bc4052607d89921663ca0de0f0cd70b79c9993d7f9f3211ec3e",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "KXFRENCHPRES-27-GATT",
+        "venue": "kalshi"
+      },
+      "note": "Same event: Attal wins 2027 French presidential election; verbatim-identical text."
+    },
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0x97c0b1316b8d9ba677414e8a682948e7560c1af60fc239b085a68cc467c21f23",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "KXSPANISHPM-27AUG22-AFEI",
+        "venue": "kalshi"
+      },
+      "note": "Same event: Feijoo becomes next PM of Spain; paraphrased resolution wording, shared proper nouns."
+    },
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0x9639a6a92c4b2a434ee674c104c7f4660340663b91e418e2be1ee4377971aa32",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "KXSERBIAPM-27DEC31-AVUC",
+        "venue": "kalshi"
+      },
+      "note": "Same event: Vucic becomes next PM of Serbia; paraphrased resolution wording."
+    }
+  ],
+  "near_miss": [
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0x0fcfcfc35d71424c0693c717d2e3bc9b8992910835d124d80cd2f01498f1d3dc",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "KXHEGSETHOUT-26APR-29JAN01",
+        "venue": "kalshi"
+      },
+      "note": "Same subject, different contracts: out as SecDef by Dec 31 2026 vs before Jan 1 2029."
+    },
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0xcfc6e088b78e695e831e094f7aa1197c16b2436e5984b12fb9286361804b8e1b",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "KXFRPRESADVANCE-26APR18-RGLU",
+        "venue": "kalshi"
+      },
+      "note": "Same candidate and election, different resolution: winning the election vs qualifying for the runoff."
+    },
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0x29d75600ba2e46ce9dd262e813ee710a64c83c2e0c4edfa025019d00a46ae05b",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "KXALIENS-27-29",
+        "venue": "kalshi"
+      },
+      "note": "Same subject, different deadlines: US confirms aliens by Oct 31 2026 vs in 2029."
+    },
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0x1c017cbb38a9d0ab233ebb265b25c78290317e6a2470657ca18a73a112397b55",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "SENATESC-28-R",
+        "venue": "kalshi"
+      },
+      "note": "Same state and party, different election cycles: SC Senate 2026 (PM) vs 2028 (Kalshi)."
+    },
+    {
+      "a": {
+        "file": "polymarket-2026-10-09.jsonl",
+        "market_id": "0x45a79193a66e5078a29c625e78e0d4b9a059edef8e206097c48bbfe7eaf9590e",
+        "venue": "polymarket"
+      },
+      "b": {
+        "file": "kalshi-2026-10-09.jsonl",
+        "market_id": "KXNEXTISRAELPM-45JAN01-YLAP",
+        "venue": "kalshi"
+      },
+      "note": "Verbatim-identical text but incompatible close dates (2026-10-28 vs 2045-01-01): different resolution windows."
+    }
+  ],
+  "provenance": "Ground-truth pair labels judged by a human from the recorded venue text in the two JSONL fixtures recorded 2026-10-09. Each entry references records by (file, venue, market_id)."
+}
