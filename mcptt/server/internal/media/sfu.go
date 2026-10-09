@@ -105,7 +105,13 @@ func (s *SFU) joinAndAnswer(callID, userID string, pc *webrtc.PeerConnection, of
 		r.drop(userID, p)
 		return "", fmt.Errorf("media: floor track: %w", err)
 	}
+	// Publish the outbound track under the room write lock: forward reads
+	// q.out under the matching read lock, and r.join has already made this
+	// peer visible to fan-out — an unlocked write here raced the relay and
+	// could hand it a nil track.
+	r.mu.Lock()
 	p.out = out
+	r.mu.Unlock()
 
 	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offerSDP}
 	if err := pc.SetRemoteDescription(offer); err != nil {
@@ -179,8 +185,8 @@ func (r *room) forward(from *peer, pkt *rtp.Packet) {
 		return
 	}
 	for _, q := range r.peers {
-		if q == from {
-			continue
+		if q == from || q.out == nil {
+			continue // mid-negotiation joiner: answer not complete, nothing to write into
 		}
 		out := *pkt // private header per listener; payload is shared
 		q.rw.rewrite(&out.Header)

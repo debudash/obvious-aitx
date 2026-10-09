@@ -235,13 +235,9 @@ func (b *Bridge) callEnded(ev callcontrol.Event) {
 // floorDecisions translates one FloorDecisions event into adapter calls.
 // Grants and grant losses (revocation, pre-emption) are floor transitions;
 // plain denies and queue entries are not, and have no RX surface — the
-// carrier hears them as silence, which is exactly the contract.
-//
-// Known blind spot: a plain release with an empty queue emits no session
-// event today (ReleaseFloor publishes only when decisions exist), so the
-// mirror keeps that grant until the next transition self-corrects it. The
-// audio path is unaffected — the tap mirrors what the gate forwards, and
-// the gate stopped forwarding at release.
+// carrier hears them as silence, which is exactly the contract. Releases
+// with an empty queue arrive as empty-decision events and clear any grant
+// bookkeeping the mirror kept.
 func (b *Bridge) floorDecisions(ev callcontrol.Event) {
 	b.mu.Lock()
 	stream, ok := b.streams[ev.CallID]
@@ -252,6 +248,16 @@ func (b *Bridge) floorDecisions(ev callcontrol.Event) {
 	grants := b.grants[ev.CallID]
 	group := stream.groupID
 	now := time.Now()
+	if len(ev.Decisions) == 0 {
+		// A release with no successor arrives as an empty-decision event:
+		// the floor is idle. Drop the mirror's grant bookkeeping (the tap
+		// already stopped forwarding, which is the RX surface the carrier
+		// actually hears). No adapter event — a plain release is silence,
+		// not a transition the carrier mirrors.
+		delete(b.grants, ev.CallID)
+		b.mu.Unlock()
+		return
+	}
 	for _, d := range ev.Decisions {
 		switch d.Outcome {
 		case floor.OutcomeGranted:
