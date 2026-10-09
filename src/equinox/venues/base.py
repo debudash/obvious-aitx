@@ -443,6 +443,60 @@ class RequestsTransport:
         return TransportResponse(status_code=response.status_code, text=response.text)
 
 
+def collect_results(adapters: Sequence[VenueAdapter], *, limit: int) -> list[CollectResult]:
+    """Collect from every adapter, isolating venue failures as data.
+
+    An adapter that raises (a bug, or a venue down at a deeper layer than
+    pages) must not poison the others: its venue comes back as a
+    :class:`CollectResult` carrying one :class:`~equinox.model.FetchError`
+    describing the crash, and the healthy venues proceed (spec §Resilience,
+    "one venue fully down"). The broad except is the isolation boundary —
+    the failure is surfaced as data, never swallowed.
+
+    Unlike :func:`collect_snapshot` this keeps the full per-venue result,
+    including skipped-record accounting and page counts, so callers (the
+    CLI's ingest summary) can report an ingest honestly.
+    """
+    results: list[CollectResult] = []
+    for adapter in adapters:
+        venue = getattr(adapter, "venue", "unknown")
+        try:
+            results.append(adapter.collect(limit))
+        except Exception as exc:  # isolation boundary: the failure is surfaced as data below
+            base_url = getattr(adapter, "base_url", "unknown")
+            results.append(
+                CollectResult(
+                    venue=venue,
+                    errors=(
+                        FetchError(
+                            venue=venue,
+                            url=str(base_url),
+                            cause=f"adapter crashed: {type(exc).__name__}: {exc}",
+                            attempts=1,
+                        ),
+                    ),
+                )
+            )
+    return results
+
+
+def snapshot_from_results(
+    results: Sequence[CollectResult], *, fetched_at: datetime
+) -> MarketSnapshot:
+    """Merge :class:`CollectResult` objects into one snapshot.
+
+    Venues list in collection order; markets, errors, and degraded flags are
+    pooled — the snapshot constructor applies its canonical total orders.
+    """
+    return MarketSnapshot(
+        fetched_at=fetched_at,
+        venues=[result.venue for result in results],
+        markets=[market for result in results for market in result.markets],
+        degraded=[result.venue for result in results if result.degraded],
+        errors=[error for result in results for error in result.errors],
+    )
+
+
 def collect_snapshot(
     adapters: Sequence[VenueAdapter], *, limit: int, fetched_at: datetime
 ) -> MarketSnapshot:
@@ -451,41 +505,12 @@ def collect_snapshot(
     An adapter that raises (a bug, or a venue down at a deeper layer than
     pages) must not poison the others: its venue is recorded as degraded with
     a :class:`~equinox.model.FetchError` describing the crash, and the healthy
-    venues proceed (spec §Resilience, "one venue fully down"). The broad
-    except is the isolation boundary — the failure is surfaced as data on the
-    snapshot, never swallowed.
+    venues proceed (spec §Resilience, "one venue fully down"). The isolation
+    boundary lives in :func:`collect_results`; this is the snapshot-only view
+    of the same collection.
     """
-    markets: list[Market] = []
-    errors: list[FetchError] = []
-    degraded: list[str] = []
-    venues: list[str] = []
-    for adapter in adapters:
-        venue = getattr(adapter, "venue", "unknown")
-        venues.append(venue)
-        try:
-            result = adapter.collect(limit)
-        except Exception as exc:  # isolation boundary: the failure is surfaced as data below
-            base_url = getattr(adapter, "base_url", "unknown")
-            errors.append(
-                FetchError(
-                    venue=venue,
-                    url=str(base_url),
-                    cause=f"adapter crashed: {type(exc).__name__}: {exc}",
-                    attempts=1,
-                )
-            )
-            degraded.append(venue)
-            continue
-        markets.extend(result.markets)
-        errors.extend(result.errors)
-        if result.degraded:
-            degraded.append(result.venue)
-    return MarketSnapshot(
-        fetched_at=fetched_at,
-        venues=venues,
-        markets=markets,
-        degraded=degraded,
-        errors=errors,
+    return snapshot_from_results(
+        collect_results(adapters, limit=limit), fetched_at=fetched_at
     )
 
 
@@ -506,7 +531,9 @@ __all__ = [
     "TransportFailure",
     "TransportResponse",
     "VenueAdapter",
+    "collect_results",
     "collect_snapshot",
     "get_json_with_retries",
     "require_field",
+    "snapshot_from_results",
 ]

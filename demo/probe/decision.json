@@ -1,0 +1,40 @@
+{
+  "decision_id": "rt_d2abfda7f9d5",
+  "intent": {
+    "market_ref": "pair:KXSB-27-KC:0xee307e0609e90bd64e7bb75135662091ff438b043031d79337a67b4d1f54763d",
+    "side": "yes",
+    "shares": 100
+  },
+  "quotes": [
+    {
+      "venue": "polymarket",
+      "all_in_cost": 0.10979551999999998,
+      "breakdown": {
+        "price": 0.104,
+        "spread_impact": 0.0029999999999999957,
+        "fee": 0.00279552
+      },
+      "stale": false
+    },
+    {
+      "venue": "kalshi",
+      "all_in_cost": 0.11130000000000001,
+      "breakdown": {
+        "price": 0.1,
+        "spread_impact": 0.0050000000000000044,
+        "fee": 0.006300000000000001
+      },
+      "stale": false
+    }
+  ],
+  "chosen": "polymarket",
+  "rejected": [],
+  "rationale": [
+    "2 quotable venue(s) for pair:KXSB-27-KC:0xee307e0609e90bd64e7bb75135662091ff438b043031d79337a67b4d1f54763d: venue=polymarket, venue=kalshi",
+    "venue=polymarket all-in 0.1098 = price 0.1040 + spread_impact 0.0030 + fee 0.0028 (fee source market:0xee307e0609e90bd64e7bb75135662091ff438b043031d79337a67b4d1f54763d:feeSchedule.rate)",
+    "venue=kalshi all-in 0.1113 = price 0.1000 + spread_impact 0.0050 + fee 0.0063 (fee source config:2026-10-09)",
+    "venue=polymarket leads venue=kalshi by 0.0015 on raw cost \u2014 largest contributor: price (-0.0040)",
+    "per-share all-in comparison under the top-of-book assumption (spec A2); shares=100 do not change the ranking",
+    "chosen: venue=polymarket"
+  ]
+}
