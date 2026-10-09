@@ -1,8 +1,10 @@
-"""Structural purity guards for the matching and routing layers.
+"""Structural purity guards for the model, matching, and routing layers.
 
-The PRD requires venue-free, I/O-free matching and routing. Rather than trust
-convention, the import graph is enforced statically: the pure packages must
-never import the venue adapters or HTTP machinery.
+The PRD requires venue-free, I/O-free matching and routing, and the market
+model must stay pure too (it is the representation every layer shares).
+Rather than trust convention, the import graph is enforced statically: the
+pure packages and modules must never import the venue adapters, HTTP
+machinery, or the standard library's I/O surfaces.
 
 Static AST analysis; dynamic ``importlib`` calls with computed names are out
 of scope for the spike.
@@ -17,8 +19,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src" / "equinox"
 PKG_ROOT = SRC_ROOT.parent  # src/, the root for resolving relative imports
 
-PURE_PACKAGES = ("matching", "routing")
-FORBIDDEN_IMPORTS = ("requests", "urllib", "equinox.venues")
+PURE_PACKAGES = ("matching", "routing", "model")
+PURE_MODULES = ("config",)  # top-level pure modules (src/equinox/<name>.py)
+FORBIDDEN_IMPORTS = (
+    "requests",
+    "urllib",
+    "http",
+    "socket",
+    "ftplib",
+    "ssl",
+    "subprocess",
+    "os",
+    "pathlib",
+    "io",
+    "shutil",
+    "equinox.venues",
+)
 
 
 def _import_targets(path: Path) -> set[str]:
@@ -57,3 +73,16 @@ def test_pure_packages_never_import_io_or_venues(package: str) -> None:
         if _is_forbidden(module)
     ]
     assert not violations, "forbidden imports in pure layer:\n" + "\n".join(violations)
+
+
+@pytest.mark.parametrize("module_name", PURE_MODULES)
+def test_pure_modules_never_import_io_or_venues(module_name: str) -> None:
+    module_path = SRC_ROOT / f"{module_name}.py"
+    assert module_path.is_file(), f"pure module missing: {module_path}"
+
+    violations = [
+        f"{module_path.relative_to(REPO_ROOT)} imports {module}"
+        for module in sorted(_import_targets(module_path))
+        if _is_forbidden(module)
+    ]
+    assert not violations, "forbidden imports in pure module:\n" + "\n".join(violations)

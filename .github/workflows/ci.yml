@@ -34,4 +34,7 @@ jobs:
         run: ruff check .
 
       - name: Tests (pytest with coverage)
-        run: pytest --cov=equinox --cov-report=term-missing
+        # Coverage gate scoped to the model package and config module — the
+        # shared-representation layers that carry normalization risk.
+        # Adapter/matcher/router tasks raise their own gates as they land.
+        run: pytest --cov=equinox.model --cov=equinox.config --cov-fail-under=85 --cov-report=term-missing
